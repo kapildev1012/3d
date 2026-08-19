@@ -1,0 +1,1111 @@
+
+
+=============== PAGE 1 ===============
+--- bbox=(54,27,212,45)
+2026 European Control Conference (ECC)
+July 7-10, 2026. Reykjavík, Iceland
+--- bbox=(56,73,556,89)
+Adaptive Tensegrity-Based Control for Multi-Agent Obstacle Avoidance
+--- bbox=(91,106,505,119)
+Benjamin Ingalls1, Quintin Nelson1, Luis Rodolfo Garcia Carrillo2, and Manoranjan Majji3
+--- bbox=(54,151,299,279)
+Abstract— This paper addresses the problem of multi-agent
+coordination and obstacle avoidance for systems with limited
+sensing. Inspired by tensegrity structures, a nonlinear, distance-
+based control law composed of networked virtual tensile and
+compressive members is proposed. An adaptive gain relaxation
+on tensile forces is added, allowing formations to smoothly
+deform around convex obstacles before reforming back to the
+designed configuration. The obstacle avoidance protocol only
+relies on local spatial measurements, making it suitable for
+agents with limited sensing. Simulations demonstrate that a
+simple formation utilizing tensegrity-based control successfully
+navigates obstacles and is robust to noise and dynamic distur-
+bances.
+--- bbox=(138,293,215,303)
+I. INTRODUCTION
+--- bbox=(54,312,299,549)
+The principles of structural rigidity have found growing
+application in the control of multi-agent systems (MAS). A
+core challenge of MAS is maintenance of geometric rela-
+tions between agents, especially in formations with limited
+sensing and communication. When each agent only has
+access to local measurements – being the relative position
+of neighboring agents and nearby obstacles – formation
+control strategies must preserve structure and adaptability
+without relying on global information or centralized control.
+By viewing these networks as a graph configuration, rigidity
+theory can be applied to control strategies to preserve the
+formation integrity in the presence of disturbances. This is
+beneficial for MAS networks as it increases redundancy,
+robustness, and configuration flexibility [1], [2], [3], [4].
+However, while many practical MAS applications require
+a fixed configuration, complex environments often demand
+adaptability. Obstacles, constraints, and dynamic mission ob-
+jectives necessitate formations to deform or reconfigure while
+maintaining their overall rigidity properties [5]. Integrating
+deformation capabilities for obstacle and collision avoidance
+--- bbox=(54,560,299,580)
+1 Graduate Student, Department of Aerospace Engineering, Texas A&M
+University. Email: {ben ingalls,qcolby10}@tamu.edu
+--- bbox=(54,580,299,607)
+2
+Space
+Vehicles
+Directorate,
+Air
+Force
+Research
+Laboratory
+(AFRL),
+Kirtland
+Air
+Force
+Base
+(KAFB),
+New
+Mexico.
+Email:
+luis rodolfo.garcia carrillo@spaceforce.mil
+--- bbox=(54,607,299,626)
+3Professor, Department of Aerospace Engineering, Texas A&M Univer-
+sity. Email: mmajji@tamu.edu
+--- bbox=(54,627,299,662)
+This work was supported by the Air Force Research Laboratory (AFRL)
+under the SMART Scholars Program and the NASA MIRO ‘Inflatable
+Deployable Environments and Adaptive Space Systems’ (IDEAS²) Center
+under Grant No. 80NSSC24M0178.
+--- bbox=(54,663,299,716)
+The Air Force Office of Scientific Research (AFOSR) Space University
+Research Initiative (SURI) project “Breaking the Launch Once Use Once
+Paradigm” (Grant No: FA9550-22-1-0093) is acknowledged for its partial
+support of the research here-in. Drs. Howie Choset, Andrew Sinclair,
+Fred Levy, Stacie Williams, Mr. Matt Cleal, and Mr. Andy Kwas are
+acknowledged for their motivation, technical support, and discussions.
+--- bbox=(54,717,299,733)
+Approved for public release; distribution is unlimited. Public Affairs
+release approval #AFRL-2025-5288
+--- bbox=(54,749,315,757)
+978-3-907144-13-8 ©2026 EUCA
+2442
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(315,260,551,269)
+(a) Cubic tensegrity prism
+(b) Seven bar tensegrity prism
+--- bbox=(380,374,491,393)
+(c) Six bar tiled tensegrity
+prism plate
+--- bbox=(313,400,558,434)
+Fig. 1: Tensegrity structures use tension to stabilize compres-
+sion members. This arrangement offers potential for high-
+precision control in robotics and automated systems.
+--- bbox=(313,461,558,482)
+into the MAS control law is essential to guarantee safety and
+mission success.
+--- bbox=(313,485,558,614)
+In this paper, we consider a class of structural frameworks
+called tensegrity structures, which are systems of purely
+compressive and tensile members held together in equilib-
+rium [6]. In mechanical systems, these members are realized
+as bars (compressive) and strings (tensile), as seen in Figure
+1. Based on these principles, we produce virtual tensegrity
+structures by defining each agent as a node of a structure
+and imposing attractive (tensile) and repulsive (compressive)
+forces between agents. These structures then define a control
+law that maintains geometric relations between agents while
+being resilient to noise and disturbances.
+--- bbox=(313,616,558,710)
+An effective MAS formation must be able to navigate
+through environments with obstacles. Looking to nature we
+see large systems of independent agents such as birds or
+fish that are able to morph and split around hazards and
+obstacles, and many MAS control algorithms have taken
+inspiration from these [7], [8]. However, these algorithms do
+not maintain formation topology, so a different formulation
+is used.
+--- bbox=(313,712,558,734)
+The musculoskeletal system of many vertebrates and
+tensegrity structures have often been related and studied
+
+
+=============== PAGE 2 ===============
+--- bbox=(54,54,299,220)
+together [6], [9]. On the micro level, the cytoskeletal system
+of single cell organisms can be modeled as a tensegrity
+structure [10]. Examining flexibility in these systems, the
+skeletal system of many snakes have ligaments that can relax
+during feeding, allowing it to eat prey larger than its head,
+such as the common watersnake. As a result, the ligament
+connecting the two halves of the snakes’ mandible can
+separate by 770% its resting length [11]. On the micro level,
+mutable collagenous tissue (MCT), found in the skin sea
+cucumbers and other members of the Echinodermata phylum
+can be rigid via tension between collagen fibrils, protecting
+against predators. By chemically relaxing the stress between
+fibrils, this tissue becomes soft allowing for locomotion [12],
+[13], [14].
+--- bbox=(54,222,299,292)
+Inspired by these examples, virtual string relaxation is
+introduced in the proposed MAS control algorithm, allowing
+the formation to loosen when deformed past equilibrium.
+This provides the formation with the ability to navigate
+through obstructed environments while maintaining forma-
+tion topology.
+--- bbox=(54,302,109,312)
+Related Work
+--- bbox=(54,318,299,614)
+The balance between rigidity and deformation control
+makes a tensegrity-based framework an attractive candidate
+for designing robust and adaptive MAS control frame-
+works. Several approaches have been proposed to implement
+tensegrity-based formation control, e.g. [15], [16], [17], [18],
+[19]. These methodologies model formations with virtual
+forces acting like pre-stressed linear springs that are func-
+tions of inter-agent distances. While the proposed formula-
+tions capture the essential behavior of tensegrity elements,
+the inclusion of pre-stressed springs can lead to negative
+axial stiffness in the virtual force domain, thereby producing
+bistability and potential non-unique equilibrium configura-
+tions. Furthermore, the restriction to linear springs limits
+the controller design. In [20], a nonlinear, power law-based
+forcing function is utilized. However, this method relies on a
+set rest lengths of each member, which removes the natural
+pre-stress property of the tensegrity framework and creates a
+fragile equilibrium set. Research specializing in collision and
+obstacle avoidance in tensegrity-based formation control is
+relatively scarce. A linear, string-based tensegrity framework
+that can vary the lengths of the virtual bars to avoid obstacles
+is proposed in [19]. However, this work relies on pre-planned
+length adjustments from a mission planner and does not
+consider collision avoidance sensing or an adaptive obstacle
+avoidance mechanism.
+--- bbox=(54,624,134,634)
+Main Contributions
+--- bbox=(54,640,299,734)
+In this paper, a generalized tensegrity-based formation
+control algorithm is proposed for MAS with limited sensing
+in an obstructed environment. Compared with the results
+discussed in the literature review, the contributions of this
+paper are threefold. First, a distributed formation control
+law is formulated using power-law action functions. These
+virtual forces do not rely on preset member lengths, and their
+linearity is guided by the function parameters, increasing
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(313,54,558,196)
+freedom in controller performance design. Second, a col-
+lision avoidance protocol is integrated to ensure that agents
+do not collide with each other or obstacles. Lastly, a tension
+relaxation behavior is introduced. A continuous piecewise
+function is utilized to ease virtual string tensions in the
+presence of increased inter-agent distances. This smoothly
+adjusts the stiffness of the formation, allowing the agents
+to spread out due to navigation and collision avoidance
+forces while preserving the tensegrity-based graph topology.
+Numerical simulations validate these theoretical findings and
+demonstrate convergence of the MAS formation to a desired
+equilibrium configuration.
+--- bbox=(313,204,558,334)
+This manuscript is organized as follows. Section II dis-
+cusses preliminary concepts of graph theory and tensegrity
+principles, as well as notation. The problem statement is out-
+lined in Section III. Our main result is presented in Section
+IV, which consists of the novel forcing functions used in the
+proposed tensegrity-based control law, as well as the obstacle
+avoidance and string relaxation functions. Section V con-
+structs tensegrity based formations and provides simulations
+of the response to navigating an environment with obstacles.
+Finally, Section VI provides concluding remarks and future
+directions.
+--- bbox=(334,344,537,354)
+II. PRELIMINARIES AND PROBLEM STATEMENT
+--- bbox=(313,360,384,370)
+A. Graph Theory
+--- bbox=(313,376,558,471)
+Let n denote the number of nodes embedded in an
+d-dimensional configuration. Let {qi
+∈
+Rd}i∈V denote
+the position of a node and define the node matrix q =
+[q1, q2, ..., qn] ∈Rd×n. An undirected graph G is a pair
+(V, E) that consists of a set of nodes V = {1, ..., n} and a set
+of edges E ⊆V ×V where information flows equally in both
+directions across each edge. The set of neighbors of node i is
+defined by Ni = {j ∈V : aij̸ = 0} = {j ∈V : (i, j) ∈E}.
+--- bbox=(313,471,558,548)
+The adjacency matrix A = [aij] of an undirected graph
+is a symmetric matrix with nonzero elements satisfying the
+property aij̸ = 0 ⇔(i, j) ∈E and otherwise aij = 0 and
+aii = 0. This matrix is used for describing the communica-
+tion weights among nodes. The degree matrix D = D(A) is
+a diagonal matrix with elements Dii = Pn
+--- bbox=(313,531,558,553)
+j=1 aij. The graph
+Laplacian L is defined as
+--- bbox=(404,562,558,573)
+L = D(A) −A
+(1)
+--- bbox=(313,582,558,616)
+The matrix L always has a uniform eigenvector 1n =
+(1, ..., 1)⊤associated with a λ = 0 eigenvalue. The undi-
+rected graph G is considered connected iff rank(L) = n −1.
+--- bbox=(313,626,500,636)
+B. Tensegrity Structures and Self-Equilibrium
+--- bbox=(313,642,558,676)
+The necessary condition for a structure to be stable is
+that its stiffness matrix K with respect to any non-trivial
+motion v, satisfies the equation
+--- bbox=(411,683,558,695)
+v⊤Kv > 0.
+(2)
+--- bbox=(313,704,545,715)
+The matrix K of a tensegrity structure can be written as
+--- bbox=(403,724,558,735)
+K = KE + KG
+(3)
+--- bbox=(297,749,315,757)
+2443
+
+
+=============== PAGE 3 ===============
+--- bbox=(54,54,299,148)
+where KE is the linear stiffness matrix and KG is the
+geometrical stiffness matrix. Assume that the tensile forces
+in the edges have positive axial stiffness, such that KE is
+always positive semi-definite. Then, Equation (2) holds only
+if KG is also positive semi-definite. This is determined by
+the sufficient conditions for structural stability, which are
+dependent on two quantities: the force density matrix and
+the geometry matrix, which are described next.
+--- bbox=(54,151,299,209)
+Let fij be the internal force of the edge connecting the
+i-th and j-th nodes. Further, let ℓij = ||qi−qj|| be the length
+of that edge. Denote ωij = fij/ℓij as a tension coefficient.
+Then, the force density matrix (FDM), D ∈Rn×n, is a
+weighted Laplacian defined as
+--- bbox=(140,221,149,242)
+
+
+
+--- bbox=(149,223,238,247)
+−ωij,
+if i̸ = j
+P
+--- bbox=(106,237,137,248)
+[D]ij =
+--- bbox=(149,237,244,262)
+k∈Ni ωik,
+if i = j
+0,
+if i /∈Nj
+--- bbox=(140,250,149,263)
+
+
+--- bbox=(54,274,299,344)
+The symmetric matrix D represents the weighted connec-
+tivity of the structure and is used to evaluate its prestress
+stability. Form-finding analysis uses this matrix to find self-
+equilibrium (self-stress) configurations. The nodal coordi-
+nates of the equilibrium configuration can be found using
+the set of equations
+--- bbox=(103,358,299,368)
+Dx = 0,
+Dy = 0,
+Dz = 0
+(5)
+--- bbox=(54,382,277,392)
+where x, y, and z are the solution coordinate vectors.
+--- bbox=(64,393,298,406)
+For a structure with B bars and S strings, let CB ∈RB×n
+--- bbox=(54,403,299,418)
+and CS ∈RS×n denote the associated connectivity matrices:
+--- bbox=(124,428,133,450)
+
+
+
+--- bbox=(133,430,301,471)
+−1,
+if qi is the start node of member j
+1,
+if qi is the end node of member j
+0,
+if qi is not connected to member j
+--- bbox=(54,445,121,456)
+[CB]ij, [CS]ij =
+--- bbox=(124,458,133,471)
+
+
+--- bbox=(54,484,299,522)
+⊤.
+Then, the coordinate differences of members in each dimen-
+sion may be written as
+--- bbox=(241,486,255,497)
+C⊤
+--- bbox=(248,486,280,499)
+B
+C⊤
+--- bbox=(232,487,236,496)
+
+--- bbox=(54,487,229,498)
+Define a combined connectivity matrix C =
+--- bbox=(273,492,278,499)
+S
+--- bbox=(100,535,299,545)
+u = Cx,
+v = Cy,
+w = Cz
+(6)
+--- bbox=(54,559,299,593)
+Denote the diagonal form of u by U
+=
+diag(u)
+∈
+R(B+S)×(B+S) and similarly for V = diag(v) and W =
+diag(w). The geometry matrix, G, is defined as
+--- bbox=(101,598,272,623)
+ Uu
+V v
+W w
+Uv
+Uw
+V w 
+--- bbox=(80,606,99,616)
+G =
+--- bbox=(54,630,299,652)
+Then, it is possible to define sufficient conditions that must
+be met for a stable tensegrity structure.
+--- bbox=(54,655,299,677)
+Lemma 1: A tensegrity structure embedded in d dimen-
+sions is stable if the following conditions are satisfied:
+--- bbox=(64,683,294,718)
+1) The FDM D has a rank deficiency of at least d + 1.
+2) D is positive semi-definite.
+3) The rank of the geometry matrix G is d(d + 1)/2.
+--- bbox=(74,724,226,734)
+Proof: The proof follows from [21].
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(372,54,499,64)
+III. PROBLEM FORMULATION
+--- bbox=(313,74,558,155)
+Consider each agent in a homogeneous MAS as a distinct
+node with each inter-agent interaction described as an edge in
+the undirected graph G. Assume that agent i ∈V = {1, ..., n}
+can measure the distance between itself and a neighbor, given
+by qi −qj, j ∈Ni. Furthermore, the agent can measure
+obstacles within the set radius ry, found within the obstacle
+set N c
+--- bbox=(313,145,558,167)
+i . Let dj denote the position of the closest point of an
+obstacle to the agent, with j ∈N c
+--- bbox=(313,157,558,179)
+i . The dynamics of agent
+i are described as
+--- bbox=(416,188,430,198)
+X
+--- bbox=(356,189,388,202)
+ui = ut
+--- bbox=(435,189,444,201)
+uc
+--- bbox=(440,189,514,202)
+ij(qi, dj, ry) + un
+--- bbox=(384,191,411,202)
+i(q) +
+--- bbox=(509,191,558,202)
+i
+(8)
+--- bbox=(413,204,433,212)
+j∈N c
+--- bbox=(428,209,431,214)
+i
+--- bbox=(381,226,558,237)
+m¨qi = −c ˙qi + satumax(ui)
+(9)
+--- bbox=(287,237,299,247)
+(4)
+--- bbox=(313,247,558,270)
+where m is the mass of the agent, c > 0 is a damping
+parameter, ut
+--- bbox=(366,258,487,272)
+i is the edge force term, uc
+--- bbox=(313,260,558,281)
+ij is the collision
+avoidance term, and un
+--- bbox=(313,272,558,331)
+i is the navigation term. The latter
+input represents an external input that steers the agent
+according to a higher-level navigational control law. Finally,
+the magnitude of the resultant summation is clamped to
+±umax which represents input saturation.
+--- bbox=(323,330,558,342)
+The objective is to design the distributed control law ut
+--- bbox=(313,337,558,390)
+i
+such that the formation converges to a desired equilibrium
+configuration while resisting small perturbations and main-
+taining the geometric structure, as shown in Figure 2. The
+desired outcome is then
+--- bbox=(374,399,417,412)
+qi(t) →q∗
+--- bbox=(413,401,497,414)
+i ,
+for i = 1, . . . , n
+--- bbox=(313,421,389,433)
+where q∗
+=
+[q∗
+--- bbox=(313,421,558,529)
+1, . . . , q∗
+n] is a nominal self-stress state
+consistent with the tensegrity structure. Due to the limited
+sensing capabilities of the collision avoidance term, each
+agent can only obtain local obstacle information. Conse-
+quently, trajectory planning-based obstacle avoidance is not
+feasible. The control objective is thus extended to allow the
+equilibrium condition of the formation to expand, allowing
+the system to adaptively deform and move around obstacles,
+while preserving formation geometry.
+--- bbox=(287,607,299,617)
+(7)
+--- bbox=(313,660,558,717)
+Fig. 2: Coordination and geometry of a MAS formation. Blue
+and red lines represent bar and string virtual forces, respec-
+tively. The objective is to design the distributed control law
+such that the formation converges to a desired equilibrium
+configuration.
+--- bbox=(297,749,315,757)
+2444
+
+
+=============== PAGE 4 ===============
+--- bbox=(135,54,218,64)
+IV. MAIN RESULTS
+--- bbox=(54,70,299,127)
+This section presents the novel tensegrity-based MAS
+control law. First, Section IV-A presents the design of the
+virtual tensegrity structure force model that establishes a state
+of self-stress in the MAS. Next, Section IV-B introduces a
+string relaxation protocol for obstacle avoidance.
+--- bbox=(54,136,215,145)
+A. Tensegrity-Based Formation Control
+--- bbox=(54,150,299,173)
+Let EB ⊂E denote the set of bar edges, and define the
+bar neighbor set of node i as
+--- bbox=(115,179,130,191)
+N B
+--- bbox=(123,181,238,193)
+i
+:= { j ∈N | (i, j) ∈EB}
+--- bbox=(54,199,299,221)
+Similarly, let ES ⊂E denote the set of string edges, with
+neighbor set
+--- bbox=(116,228,130,240)
+N S
+--- bbox=(124,230,237,242)
+i := { j ∈N | (i, j) ∈ES}
+--- bbox=(54,248,185,258)
+Define an internal edge force as
+--- bbox=(143,265,299,277)
+fij(z) = kijzαij
+(10)
+--- bbox=(54,283,299,309)
+where kij ∈R and αij ∈R. Denote kB and αB as bar
+parameters and kS and αS as string parameters such that
+--- bbox=(143,314,152,339)
+
+
+
+
+--- bbox=(152,316,262,326)
+{kB, αB},
+if (i, j) ∈EB,
+--- bbox=(90,334,141,344)
+{kij, αij} =
+--- bbox=(152,334,260,345)
+{kS, αS},
+if (i, j) ∈ES,
+--- bbox=(143,347,152,363)
+
+
+
+--- bbox=(152,352,235,363)
+{0, 0},
+if i = j
+--- bbox=(64,370,223,380)
+Define the collective potential function
+--- bbox=(158,387,173,397)
+X
+--- bbox=(180,389,299,400)
+ψ(||qi −qj||)
+(12)
+--- bbox=(119,389,150,399)
+V (q) =
+--- bbox=(153,404,177,411)
+(i,j)∈E
+--- bbox=(54,418,78,428)
+where
+--- bbox=(171,427,184,442)
+Z z
+--- bbox=(138,438,168,448)
+ψ(z) =
+--- bbox=(176,438,299,456)
+0
+f(s)ds
+(13)
+--- bbox=(54,461,299,495)
+Inputs to a node from virtual bar and string connections can
+be derived by taking the gradient of the potential function.
+The edge force term takes the form
+--- bbox=(66,501,75,513)
+ut
+--- bbox=(72,503,132,515)
+i = −∇qiV (q)
+--- bbox=(228,517,255,531)
+kijℓαij
+--- bbox=(100,517,114,527)
+X
+--- bbox=(209,517,224,527)
+X
+--- bbox=(78,520,96,530)
+= −
+--- bbox=(118,520,206,531)
+f(∥qi −qj∥)nij = −
+--- bbox=(244,520,299,533)
+ij nij
+(14)
+--- bbox=(98,534,116,542)
+j∈Ni
+--- bbox=(207,534,226,542)
+j∈Ni
+--- bbox=(54,548,78,558)
+where
+--- bbox=(95,560,256,578)
+ℓij = ||qi −qj||
+and
+nij = qi −qj
+--- bbox=(54,573,299,612)
+ℓij
+Using Lemma 1, stability conditions of this system with
+respect to the bar and string parameters may be derived.
+--- bbox=(54,613,299,647)
+Lemma 2: Consider a system of agents in a configuration
+that admits a state of self-stress, q∗, and a positive semi-
+definite FDM D. Assume that uc
+--- bbox=(187,636,287,650)
+ij = 0
+∀{i, j} and un
+--- bbox=(54,637,299,671)
+i =
+0 ∀i. Then the formation is structurally stable under the
+condition
+--- bbox=(110,679,242,691)
+kij(αij −1) ≥0
+∀(i, j) ∈E
+--- bbox=(54,698,118,708)
+or equivalently:
+--- bbox=(64,712,180,735)
+1) If αij > 1, then kij ≥0.
+2) If αij = 1, then kij ∈R.
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(313,54,558,112)
+3) If αij < 1, then kij ≤0
+Proof: The stiffness matrix K is defined as the Hessian
+of the system evaluated at an equilibrium point, K
+=
+∇2V (q∗) ∈Rdn×dn. Consider a block Hessian matrix Hij ∈
+Rd×d such that K is in the form
+--- bbox=(392,117,398,127)
+
+--- bbox=(495,117,502,127)
+
+--- bbox=(399,117,494,158)
+H11
+H12
+· · ·
+H1n
+H21
+H22
+· · ·
+H2n
+...
+--- bbox=(392,135,398,163)
+
+--- bbox=(495,135,558,163)
+
+(15)
+--- bbox=(369,139,389,149)
+K =
+--- bbox=(398,140,495,171)
+...
+...
+...
+Hn1
+Hn2
+· · ·
+Hnn
+--- bbox=(313,178,420,188)
+Each block is found to be
+--- bbox=(350,192,358,202)
+(
+--- bbox=(358,194,454,207)
+−ωij(Id + (αij −1)n∗
+--- bbox=(450,194,474,207)
+ijn∗⊤
+--- bbox=(358,195,548,219)
+ij ),
+if i̸ = j
+P
+--- bbox=(321,202,347,213)
+Hij =
+--- bbox=(369,208,479,223)
+k∈Ni ωik(Id + (αik −1)n∗
+--- bbox=(475,208,500,222)
+ikn∗⊤
+--- bbox=(490,209,548,222)
+ik ),
+if i = j
+--- bbox=(313,226,508,241)
+where Id ∈Rd×d is the identity matrix and n∗
+--- bbox=(313,228,558,264)
+ij = nij(q∗).
+Equation (3) is now recovered with KG = D ⊗Id, with ⊗
+denoting the Kronecker product, and
+--- bbox=(356,270,364,280)
+(
+--- bbox=(364,272,435,285)
+−ωij(αij −1)n∗
+--- bbox=(431,272,455,285)
+ijn∗⊤
+--- bbox=(364,273,525,298)
+ij ,
+if i̸ = j
+P
+--- bbox=(328,280,353,292)
+KE =
+--- bbox=(471,281,558,301)
+ik ,
+if i = j
+(16)
+--- bbox=(375,286,460,302)
+k∈Ni ωik(αik −1)n∗
+--- bbox=(456,286,481,300)
+ikn∗⊤
+--- bbox=(313,306,558,341)
+Since it is given that D is positive semi-definite, then KG is
+also positive semi-definite. Therefore, KE ⪰0 ⇔K ⪰0.
+Let v ∈Rdn̸ = 0 be an arbitrary vector where
+--- bbox=(282,334,299,344)
+(11)
+--- bbox=(539,346,548,360)
+2
+--- bbox=(368,348,383,358)
+X
+--- bbox=(384,349,412,361)
+ωijℓ−2
+--- bbox=(323,349,366,361)
+v⊤KEv =
+--- bbox=(457,349,470,361)
+(q∗
+--- bbox=(465,349,491,363)
+i −q∗
+--- bbox=(487,349,539,363)
+j )⊤(vi −vj)
+--- bbox=(452,350,457,360)
+ 
+--- bbox=(402,350,451,363)
+ij (αij −1)
+--- bbox=(369,365,381,372)
+i̸=j
+--- bbox=(313,379,558,402)
+As a result, KE is positive semi-definite under the condition
+that ωijℓ−2
+--- bbox=(348,388,444,403)
+ij (αij−1) = kijℓαij−3
+--- bbox=(313,391,558,414)
+ij
+(αij−1) ≥0. Since ℓij ≥0,
+the condition reduces to kij(αij −1) ≥0.
+--- bbox=(313,421,558,503)
+Remark 1. For the tensegrity-based formation, it is as-
+sumed that the connectivity matrices are chosen such that a
+state of self-stress exists. Under this condition, the internal
+force densities induced by the bar and string elements yield
+a positive, semi-definite FDM. Hence, the positive semi-
+definiteness of D follows directly from the chosen connectiv-
+ity and the assignment of tensile and compressive members.
+--- bbox=(313,505,558,576)
+Remark 2. This assignment further constrains the gains kB
+and kS to ensure the correct internal tension or compression
+along bars and strings. Thus, from Equation (10), bar edges
+must enforce kB < 0 and string edges must enforce kS > 0.
+Consequently, to preserve formation stability according to
+the conditions found in Lemma 2, αB < 0 and αS ≥1.
+--- bbox=(313,584,468,594)
+B. Expansion for Obstacle Avoidance
+--- bbox=(313,599,558,657)
+In this subsection, an extension of the tensegrity-based
+MAS control scheme is presented. The approach enables
+agents to avoid collisions and adjust the formation’s equi-
+librium condition to move around larger obstacles. Let the
+unit vector between agent i and obstacle j be defined as
+--- bbox=(401,663,558,688)
+pij =
+qi −dj
+||qi −dj||
+(17)
+--- bbox=(313,693,558,715)
+When obstacle j is another agent, then pij = nij. Define
+the collision avoidance term
+--- bbox=(411,719,491,735)
+||qi −dj||−γ −r−γ
+--- bbox=(361,722,370,734)
+uc
+--- bbox=(406,723,411,733)
+ 
+--- bbox=(491,723,496,733)
+
+--- bbox=(366,724,404,736)
+ij = −ka
+--- bbox=(498,724,558,735)
+pij
+(18)
+--- bbox=(480,729,484,736)
+y
+--- bbox=(297,749,315,757)
+2445
+
+
+=============== PAGE 5 ===============
+--- bbox=(54,54,214,66)
+where ka > 0 and γ > 0 are constants.
+--- bbox=(54,66,299,136)
+An additional challenge arises when navigating around
+obstacles, as the formation must be capable of splitting
+and subsequently reforming. To enable this behavior, Equa-
+tion (10) is reformulated as a piecewise function that relaxes
+the virtual string forces once the formation has progressed
+beyond a specified boundary point as
+--- bbox=(64,142,118,153)
+if {i, j} ∈ES
+--- bbox=(155,161,182,175)
+kijℓαij
+--- bbox=(146,162,155,184)
+
+
+
+--- bbox=(155,164,249,204)
+ij
+ℓij ≤z1
+h(ℓij)
+z1 ≤ℓij ≤z2
+β
+z ≥z2
+--- bbox=(102,178,144,189)
+fij(ℓij) =
+--- bbox=(146,192,155,205)
+
+
+--- bbox=(54,210,299,233)
+where h(ℓij) is a cubic spline smoothly connecting the
+piecewise function defined as
+--- bbox=(64,239,195,254)
+h(ℓij) = (2s3 −3s2 + 1)kijzαij
+--- bbox=(97,248,244,271)
+1
++ (s3 −2s2 + s)(z2 −z1)kijzαij−1
+--- bbox=(199,259,299,285)
+1
+αij
++ (−2s3 + 3s2) β
+(20)
+--- bbox=(54,291,117,304)
+with s = ℓij−z1
+--- bbox=(95,294,204,308)
+z2−z1 and β is a constant.
+--- bbox=(54,310,299,345)
+As seen in Figure 3, the terms z1 and z2 are the constant
+dividers of the piecewise function where the function has a
+constant value, β, after z2.
+--- bbox=(54,482,299,503)
+Fig. 3: String force vs. inter-agent distance for standard and
+relaxing string
+--- bbox=(54,523,299,668)
+V. NUMERICAL RESULTS
+In this section, the performance of the tensegrity-based
+control law and the obstacle avoidance protocol is demon-
+strated. Consider a d = 2 dimensional square-shaped net-
+work of four agents with the connectivity of bars and strings,
+as shown in Figure 2. A tiled formation made up of six
+interconnected squares (two rows and three columns) is
+used in the simulation. For this particular formation, the
+equilibrium condition can be found analytically. Denote lS
+as the length of the string connecting two agents along the
+perimeter of a single square tile. For this formation, a force
+balance yields the following ratio:
+--- bbox=(189,670,197,680)
+√
+--- bbox=(124,672,135,683)
+kB
+--- bbox=(197,674,299,689)
+2
+−αB+1
+(21)
+--- bbox=(140,677,188,689)
+= −lαS−αB
+--- bbox=(161,684,166,691)
+S
+--- bbox=(124,686,134,697)
+kS
+--- bbox=(54,700,299,734)
+By choosing lS, αS, and αB, the gains may be found. For
+this study, these values were chosen heuristically through
+simulation.
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(282,178,299,188)
+(19)
+--- bbox=(323,186,548,196)
+Fig. 4: Magnitude of force from virtual Bar and String
+--- bbox=(313,222,558,339)
+The values used for each parameter in the simulation are
+found in Table I. The parameter z1 was chosen to be slightly
+greater than lS so the formation does not start relaxing when
+exposed to small deformations. The parameters z2 and b were
+chosen such that the virtual string force magnitude is always
+larger than the virtual bar force magnitude when ℓij >> lS,
+as shown in Figure 4. This is to keep the formation from
+diverging when the strings relax. In addition, Gaussian noise
+with a standard deviation of σ = 0.5 was imposed on all
+measurements.
+--- bbox=(353,350,519,360)
+TABLE I: Constants used in simulations
+--- bbox=(381,367,493,393)
+dt
+0.05
+kS
+0.0341
+m
+1
+kB
+-50
+un
+--- bbox=(376,385,489,447)
+i
+[0,3]
+αS
+2
+c
+1.5
+αB
+-0.5
+lS
+15
+z1
+15.5
+σ
+0.5
+z2
+50
+ry
+8
+β
+8
+ka
+20
+γ
+0.4
+umax
+10
+--- bbox=(318,549,555,558)
+(a) t = 0 s
+(b) t = 15 s
+(c) t = 30 s
+(d) t = 40 s
+--- bbox=(313,566,558,588)
+Fig. 5: Simulation of tensegrity formation without string
+relaxation
+--- bbox=(318,692,555,701)
+(a) t = 0 s
+(b) t = 15 s
+(c) t = 30 s
+(d) t = 40 s
+--- bbox=(313,708,558,730)
+Fig. 6: Simulation of tensegrity formation with string relax-
+ation
+--- bbox=(297,749,315,757)
+2446
+
+
+=============== PAGE 6 ===============
+--- bbox=(54,54,299,160)
+The tiled formation consisting of 12 agents is shown in
+Figure 5 for the scenario when the strings do not relax and in
+Figure 6 for the scenario when string relaxation is adopted.
+Both formations use tensegrity-based control; a comparison
+to a linear spring-based control method is found in [22].
+Solid red circles denote obstacles in the environment. When
+a translucent red circle appears over an agent, it has detected
+an object within its avoidance radius ry and is reacting to
+it. A constant navigational force of un
+--- bbox=(54,150,299,184)
+i = [0, 3] is applied to
+all agents of the formation, forcing the formation to move
+in the positive Y direction.
+--- bbox=(54,186,299,327)
+As designed, both formations behave similarly while nav-
+igating close to obstacles demanding small deformations.
+However, as shown in Figure 5, when the strings do not relax,
+the formation can get hung up while navigating around large
+obstacles. On the other hand, the formation enhanced with
+string relaxation, shown in Figure 6, can navigate around
+the large obstacle by having a large local deformation of
+the two center units while keeping the integrity of the edge
+units. This behavior is achieved without communication of
+the obstacle presence between agents. A video comparing
+these two simulations can be found at
+https://youtu.be/25G0i-iGIP4.
+--- bbox=(129,335,223,345)
+VI. CONCLUSIONS
+--- bbox=(54,350,299,540)
+This paper presented a tensegrity-based formation control
+framework designed for MASs with limited sensing and
+communication capabilities. By combining nonlinear power-
+law interactions with adaptive string relaxation, the proposed
+approach enables cohesive formations that can smoothly
+deform to navigate convex obstacles and reform once the
+obstacles are clear, without requiring global information or
+centralized coordination. The control law relies only on local
+distance and obstacle measurements, making it lightweight
+and suitable for implementation on agents with restricted
+computational and sensing resources. Simulations demon-
+strate robustness to noise and dynamic disturbances while
+preserving overall formation integrity. Tensegrity-based for-
+mation control, with continued development, is a viable and
+versatile control method that fuses the structural properties
+of tensegrity structures into MAS control.
+--- bbox=(54,548,184,558)
+A. Current Research Directions
+--- bbox=(54,563,299,692)
+These algorithms are currently being implemented onto
+hardware in order to study the formation’s behavior under
+measurement and process noise. Mathematically proving the
+stability and uniqueness of tensegrity formations is also
+ongoing research. With these results, 3-D formations and
+their behavior will be studied more fully. In addition, self
+organization of large scale formations will be studied. Agents
+will be modeled as rigid bodies rather than point masses
+in order to help generalize the problem. We will apply this
+algorithm to space-like, forced environments rather than the
+flat plane studied in this paper.
+--- bbox=(149,700,204,710)
+REFERENCES
+--- bbox=(58,716,299,724)
+[1] M. De Queiroz, X. Cai, and M. Feemster, Formation control of multi-
+--- bbox=(72,725,299,733)
+agent systems: a graph rigidity approach.
+John Wiley & Sons, 2019.
+--- bbox=(49,763,563,772)
+Authorized licensed use limited to: Indian Institute Of Technology (IIT) Mandi. Downloaded on August 12,2026 at 16:02:19 UTC from IEEE Xplore.  Restrictions apply.
+--- bbox=(317,56,558,64)
+[2] X. Cai and M. De Queiroz, “Rigidity-based stabilization of multi-agent
+--- bbox=(317,65,558,91)
+formations,” Journal of Dynamic Systems, Measurement, and Control,
+vol. 136, no. 1, p. 014502, 2014.
+[3] S. A. Motevallian, C. Yu, and B. D. Anderson, “Multi-agent rigid
+--- bbox=(317,92,558,127)
+formations: A study of robustness to the loss of multiple agents,” in
+2011 50th IEEE Conference on Decision and Control and European
+Control Conference.
+IEEE, 2011, pp. 3602–3607.
+[4] R. K. Williams, A. Gasparri, A. Priolo, and G. S. Sukhatme,
+--- bbox=(317,128,558,163)
+“Evaluating network rigidity in realistic systems: Decentralization,
+asynchronicity, and parallelization,” IEEE Transactions on Robotics,
+vol. 30, no. 4, pp. 950–965, 2014.
+[5] M. Coppola, K. N. McGuire, C. De Wagter, and G. C. De Croon, “A
+--- bbox=(317,164,558,207)
+survey on swarming with micro air vehicles: Fundamental challenges
+and constraints,” Frontiers in Robotics and AI, vol. 7, p. 18, 2020.
+[6] R. E. Skelton and M. C. De Oliveira, Tensegrity systems.
+Springer,
+2009, vol. 1.
+[7] R. Olfati-Saber, “Flocking for multi-agent dynamic systems: Algo-
+--- bbox=(317,208,558,234)
+rithms and theory,” IEEE Transactions on automatic control, vol. 51,
+no. 3, pp. 401–420, 2006.
+[8] A. Barve and M. J. Nene, “Survey of flocking algorithms in multi-
+--- bbox=(317,235,558,261)
+agent systems,” International Journal of Computer Science Issues
+(IJCSI), vol. 10, no. 6, p. 110, 2013.
+[9] C. S. Chen and D. E. Ingber, “Tensegrity and mechanoregulation: from
+--- bbox=(313,262,558,288)
+skeleton to cytoskeleton,” Osteoarthritis and Cartilage, vol. 7, no. 1,
+pp. 81–94, 1999.
+[10] A. Arduino, S. Pettenuzzo, A. Berardo, V. Salomoni, C. Majorana, and
+--- bbox=(313,289,558,324)
+E. Carniel, “A continuum-tensegrity computational model for chon-
+drocyte biomechanics in afm indentation and micropipette aspiration,”
+Annals of Biomedical Engineering, vol. 50, 07 2022.
+[11] M. Close, S. Perni, C. Franzini-Armstrong, and D. Cundall, “Highly
+--- bbox=(313,325,558,351)
+extensible skeletal muscle in snakes,” Journal of Experimental Biology,
+vol. 217, no. 14, pp. 2445–2448, 2014.
+[12] M. D. Candia Carnevali, M. Sugni, F. Bonasoro, and I. C. Wilkie,
+--- bbox=(313,352,558,387)
+“Mutable collagenous tissue: A concept generator for biomimetic
+materials and devices,” Marine Drugs, vol. 22, no. 1, 2024. [Online].
+Available: https://www.mdpi.com/1660-3397/22/1/37
+[13] J. Mo, S. F. Pr´evost, L. M. Blowes, M. Egertov´a, N. J. Terrill,
+--- bbox=(313,388,558,441)
+W. Wang, M. R. Elphick, and H. S. Gupta, “Interfibrillar stiffening
+of echinoderm mutable collagenous tissue demonstrated at the
+nanoscale,” Proceedings of the National Academy of Sciences,
+vol. 113, no. 42, pp. E6362–E6371, 2016. [Online]. Available:
+https://www.pnas.org/doi/abs/10.1073/pnas.1609341113
+[14] M. Bonneel, E. Hennebert, M. Byrne, and P. Flammang, “Mutable
+--- bbox=(313,441,558,467)
+collagenous tissues in sea cucumbers,” in The world of sea cucumbers.
+Elsevier, 2024, pp. 573–584.
+[15] B. Nabet and N. E. Leonard, “Shape control of a multi-agent system
+--- bbox=(313,468,558,503)
+using tensegrity structures,” in Lagrangian and Hamiltonian Methods
+for Nonlinear Control 2006: Proceedings from the 3rd IFAC Workshop,
+Nagoya, Japan, July 2006.
+Springer, 2007, pp. 329–339.
+[16] Y. Qingkai, C. Ming, F. Hao, C. Jie, and H. Jie, “Distributed formation
+--- bbox=(313,504,558,539)
+stabilization for mobile agents using virtual tensegrity structures,” in
+2015 34th Chinese Control Conference (CCC). IEEE, 2015, pp. 447–
+452.
+[17] Q. Yang, M. Cao, H. Fang, and J. Chen, “Constructing universally
+--- bbox=(313,540,558,575)
+rigid tensegrity frameworks with application in multiagent formation
+control,” IEEE Transactions on Automatic Control, vol. 64, no. 1, pp.
+381–388, 2018.
+[18] B. Nabet, “Dynamic and control in natural and engineered multi-agent
+--- bbox=(313,576,558,593)
+systems,” Ph.D. dissertation, Citeseer, 2009.
+[19] S. Y. Lau and W. Naeem, “Co-operative tensegrity-based formation
+--- bbox=(313,594,558,620)
+control algorithm for a multi-aircraft system,” in 2015 American
+Control Conference (ACC).
+IEEE, 2015, pp. 750–756.
+[20] Z. Liu and M. Cao, “Local stability analysis for tensegrity-based multi-
+--- bbox=(313,621,558,647)
+agent formations,” in 2024 13th International Workshop on Robot
+Motion and Control (RoMoCo).
+IEEE, 2024, pp. 130–135.
+[21] J. Zhang and M. Ohsaki, “Stability conditions for tensegrity struc-
+--- bbox=(313,648,558,674)
+tures,” International journal of solids and structures, vol. 44, no. 11-
+12, pp. 3875–3886, 2007.
+[22] B. Ingalls, Q. Nelson, M. Fry, I. Hussain, M. Majji, and L. R. Gar-
+--- bbox=(331,675,558,710)
+cia Carrillo, “Hardware demonstration of tensegrity-based multi-agent
+formation control,” in Proceedings of the 2026 American Astronautical
+Society (AAS) Guidance, Navigation and Control (GNC) Conference,
+Breckenridge, Colorado, 2026.
+--- bbox=(297,749,315,757)
+2447

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en" class="dark h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>6-Bar Tensegrity Icosahedron Rover Simulator - Rolling & Bouncing Locomotion</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Import Maps for Three.js ES Modules -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/examples/jsm/controls/OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+      }
+    }
+  </script>
+
+  <!-- Chart.js UMD -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    body {
+      background-color: #070a12;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.5);
+    }
+    .glow-cyan {
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
+    }
+    .glow-emerald {
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="h-full flex flex-col overflow-x-hidden selection:bg-cyan-500 selection:text-black">
+
+  <!-- Header Navbar -->
+  <header class="glass-panel sticky top-0 z-50 px-6 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-emerald-400 flex items-center justify-center font-bold text-black text-lg shadow-lg shadow-cyan-500/20">
+        6-T
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-wide text-white flex items-center gap-2">
+          6-Bar Tensegrity Icosahedron Rover
+          <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">SUPERball Locomotion Architecture</span>
+        </h1>
+        <p class="text-xs text-slate-400">Classic 6-Bar Tensegrity Icosahedron • 24 Outer Cables • Suspended 0.1D Payload Core</p>
+      </div>
+    </div>
+
+    <!-- Live Controls Bar -->
+    <div class="flex items-center flex-wrap gap-3">
+      <!-- Mode Switcher -->
+      <button id="btn-mode-toggle" class="px-3.5 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 font-semibold text-xs border border-cyan-700/60 transition flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+        <span id="txt-mode-toggle">Mode: Locomotion Simulation</span>
+      </button>
+
+      <!-- Gait Mode Selector -->
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+        <span class="font-semibold text-slate-400">Gait Mode:</span>
+        <select id="select-gait-mode" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
+          <option value="roll_forward">Roll Forward (W)</option>
+          <option value="roll_backward">Roll Backward (S)</option>
+          <option value="steer_left">Steer Left (A)</option>
+          <option value="steer_right">Steer Right (D)</option>
+          <option value="bounce_jump">Bounce Jump (Space)</option>
+          <option value="none">Passive Equilibrium</option>
+        </select>
+      </div>
+
+      <!-- Experiment Selector -->
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+        <span class="font-semibold text-slate-400">Terrain Level:</span>
+        <select id="select-experiment" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
+          <option value="1">Level 1: Smooth Flat Terrain</option>
+          <option value="2">Level 2: Small Rocks Traversal</option>
+          <option value="3">Level 3: Medium Boulders Rolling</option>
+          <option value="4">Level 4: Large Obstacle Climb & Roll Over</option>
+          <option value="5">Level 5: Deep Crater Escape</option>
+          <option value="6">Level 6: Steep Slope Uphill Roll (18°)</option>
+          <option value="7">Level 7: Random Irregular Mars Landscape</option>
+          <option value="8">Level 8: High-Speed Rolling Gait</option>
+          <option value="9">Level 9: Impact Drop & Bounce Recovery</option>
+          <option value="10">Level 10: Multi-Obstacle Robustness Benchmark</option>
+        </select>
+      </div>
+
+      <button id="btn-play-pause" class="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-semibold text-sm transition shadow-md shadow-cyan-500/20">
+        Pause
+      </button>
+
+      <button id="btn-reset" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700 transition">
+        Reset
+      </button>
+
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+        <span>Speed:</span>
+        <select id="select-speed" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
+          <option value="1">1x (Realtime)</option>
+        </select>
+      </div>
+
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+        <span>Camera:</span>
+        <select id="select-camera" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
+          <option value="chase">Chase Rover</option>
+          <option value="orbit">Free Orbit</option>
+          <option value="top">Top-Down (X-Y)</option>
+          <option value="side">Side Elevation (Y-Z)</option>
+        </select>
+      </div>
+
+      <!-- Force Overlay Toggle -->
+      <button id="btn-toggle-forces" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
+        Force Overlay: ON
+      </button>
+
+      <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-cyan-400">
+        t = <span id="sim-time" class="font-bold">0.00 s</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- GEOMETRY CHECKPOINT BANNER -->
+  <div id="geometry-checkpoint-banner" class="hidden bg-cyan-950/90 border-b border-cyan-800/80 px-6 py-2.5 text-xs font-mono flex flex-wrap items-center justify-between text-cyan-300">
+    <div class="flex items-center gap-3">
+      <span class="px-2 py-0.5 rounded bg-cyan-900 text-cyan-200 font-bold border border-cyan-700">MILESTONE 1 VALIDATION: 6-BAR TENSEGRITY ICOSAHEDRON</span>
+      <span>• Outer Diameter = <strong class="text-white">1.0D (1.00 m)</strong></span>
+      <span>• Inner Core Diameter = <strong class="text-white">0.10D (0.10 m)</strong></span>
+      <span>• Pre-tensioned Network: <strong class="text-emerald-400">SELF-EQUILIBRIUM PRESTRESS</strong></span>
+      <span>• Topology: <strong class="text-white">TRUE 6-BAR ICOSAHEDRON</strong> (No rigid joints)</span>
+    </div>
+    <div class="text-slate-400">SUPERball Research Paper Architecture • 6 Struts / 24 Outer Cables / 12 Core Cables</div>
+  </div>
+
+  <!-- Main Viewports Split Screen -->
+  <main class="flex-1 p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[520px]">
+
+    <!-- Main 3D Canvas Viewport (2 Cols) -->
+    <div class="lg:col-span-2 glass-panel rounded-2xl overflow-hidden flex flex-col relative border border-slate-800/80">
+      <div class="absolute top-4 left-4 z-10 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-cyan-300 text-xs font-semibold backdrop-blur-md flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="txt-active-experiment-title">Level 1: Smooth Flat Terrain → Forward Rolling</span>
+      </div>
+
+      <!-- Telemetry Overlay HUD -->
+      <div class="absolute bottom-4 left-4 z-10 p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono space-y-1 backdrop-blur-md text-slate-300 min-w-[260px]">
+        <div class="flex justify-between"><span class="text-slate-400">Position (Y, Z):</span> <span id="hud-pos" class="text-cyan-400 font-bold">0.00, 0.55 m</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Gravity Vector:</span> <span id="hud-gravity" class="text-emerald-400 font-bold">-9.81 m/s² (Z-Down)</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Stability Score:</span> <span id="hud-stability" class="text-emerald-400 font-bold">98.5 / 100</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Core Accel G:</span> <span id="hud-gforce" class="text-emerald-400 font-bold">1.00 G</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Deformation RMS:</span> <span id="hud-deform" class="text-amber-400 font-bold">0.002 m</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Max Cable Tension:</span> <span id="hud-tension" class="text-rose-400 font-bold">40.0 N</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Active Gait Phase:</span> <span id="hud-gait" class="text-cyan-400 font-bold">Roll Forward</span></div>
+      </div>
+
+      <!-- 3D Canvas Container -->
+      <div id="canvas-container-main" class="w-full h-full min-h-[460px] bg-slate-950"></div>
+    </div>
+
+    <!-- Right Sidebar Controls & Structural Optimizer -->
+    <div class="glass-panel p-5 rounded-2xl flex flex-col justify-between space-y-4">
+      <div>
+        <h3 class="text-sm font-bold text-slate-200 border-b border-slate-800 pb-2.5 flex items-center justify-between">
+          <span>6-Bar Physics & Gait Parameters</span>
+          <span class="text-xs text-cyan-400 font-mono">Live Tuning</span>
+        </h3>
+
+        <div class="space-y-3.5 text-xs mt-3">
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Gravity ($g_Z$ Downward):</span>
+              <span id="val-gravity" class="font-mono text-emerald-400">9.81 m/s² (Earth)</span>
+            </div>
+            <input id="slider-gravity" type="range" min="0.0" max="20.0" step="0.5" value="9.81" class="w-full accent-emerald-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Cable Pretension:</span>
+              <span id="val-pretension" class="font-mono text-cyan-400">40.0 N</span>
+            </div>
+            <input id="slider-pretension" type="range" min="10.0" max="80.0" step="2.5" value="40.0" class="w-full accent-cyan-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Cable Stiffness ($k_S$):</span>
+              <span id="val-stiffness" class="font-mono text-cyan-400">1200 N/m</span>
+            </div>
+            <input id="slider-stiffness" type="range" min="200" max="2500" step="50" value="1200" class="w-full accent-cyan-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Rest-Length Actuation ($\Delta L$):</span>
+              <span id="val-actuation" class="font-mono text-cyan-400">0.14 m</span>
+            </div>
+            <input id="slider-actuation" type="range" min="0.02" max="0.30" step="0.01" value="0.14" class="w-full accent-cyan-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Restitution ($e_{rest}$ Bounciness):</span>
+              <span id="val-restitution" class="font-mono text-cyan-400">0.50</span>
+            </div>
+            <input id="slider-restitution" type="range" min="0.10" max="0.95" step="0.05" value="0.50" class="w-full accent-cyan-400 cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span>Terrain Roughness (RMS):</span>
+              <span id="val-roughness" class="font-mono text-cyan-400">0.04 m</span>
+            </div>
+            <input id="slider-roughness" type="range" min="0.0" max="0.35" step="0.02" value="0.04" class="w-full accent-cyan-400 cursor-pointer">
+          </div>
+        </div>
+      </div>
+
+      <!-- Automated Structural Optimizer Card -->
+      <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Structural Optimizer
+          </span>
+          <span class="text-[10px] text-slate-400 font-mono">Automated Search</span>
+        </div>
+        <p class="text-[11px] text-slate-400 leading-tight">
+          Optimizes cable pretension, stiffness, and actuation rest-length contraction to maximize rolling speed & core isolation.
+        </p>
+        <button id="btn-run-optimization" class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-xs transition shadow-md shadow-emerald-500/20">
+          Run Parameter Optimization
+        </button>
+        <div id="opt-results-box" class="hidden text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800 space-y-1">
+          <div>Best Pretension: <span id="opt-pretension" class="text-emerald-400 font-bold">40 N</span></div>
+          <div>Best Stiffness: <span id="opt-stiffness" class="text-emerald-400 font-bold">1200 N/m</span></div>
+          <div>Optimization Score: <span id="opt-score" class="text-cyan-400 font-bold">96.4 / 100</span></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Telemetry Charts Section -->
+  <section class="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    <!-- Chart 1: Payload Core G-Force Isolation -->
+    <div class="glass-panel p-4 rounded-2xl flex flex-col h-72">
+      <h3 class="text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+        <span>Central Payload Core G-Force Isolation</span>
+        <span class="text-xs text-emerald-400 font-mono">Core Acceleration (G-Force)</span>
+      </h3>
+      <div class="flex-1 relative">
+        <canvas id="chart-gforce"></canvas>
+      </div>
+    </div>
+
+    <!-- Chart 2: Deformable Ball Velocity & Deformation -->
+    <div class="glass-panel p-4 rounded-2xl flex flex-col h-72">
+      <h3 class="text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+        <span>Sphere Deformation & Rolling Velocity</span>
+        <span class="text-xs text-cyan-400 font-mono">Procrustes RMS & Speed</span>
+      </h3>
+      <div class="flex-1 relative">
+        <canvas id="chart-velocity"></canvas>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- 10 Locomotion Experiments Performance Metrics Matrix -->
+  <section class="p-4 pt-0">
+    <div class="glass-panel p-5 rounded-2xl overflow-x-auto">
+      <h3 class="text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
+        <span>10 Locomotion Experiments Performance Metrics Matrix</span>
+        <span class="text-xs text-emerald-400 font-mono">Realtime 1x Empirical Benchmark</span>
+      </h3>
+
+      <table class="w-full text-left text-xs">
+        <thead class="bg-slate-900/80 text-slate-400 uppercase font-mono border-b border-slate-800">
+          <tr>
+            <th class="py-2.5 px-3">Experiment / Level</th>
+            <th class="py-2.5 px-3">Distance</th>
+            <th class="py-2.5 px-3">Time</th>
+            <th class="py-2.5 px-3">Avg Speed</th>
+            <th class="py-2.5 px-3">Max G-Force</th>
+            <th class="py-2.5 px-3">Max Tension</th>
+            <th class="py-2.5 px-3">Deformation</th>
+            <th class="py-2.5 px-3">Obstacles</th>
+            <th class="py-2.5 px-3">Status</th>
+          </tr>
+        </thead>
+        <tbody id="experiments-table-body" class="divide-y divide-slate-800/50 text-slate-300 font-mono">
+          <!-- Populated dynamically by app.js -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- App Entry Point -->
+  <script type="module" src="./js/app.js"></script>
+
+</body>
+</html>
