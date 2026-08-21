@@ -1,4 +1,4 @@
-import { Simulation } from './simEngine.js?v=20260821-roll1';
+import { Simulation } from './simEngine.js?v=20260821-level10';
 import { DRIVE_CONTROLLER_LABELS } from './reference/controllerAlgorithms.js';
 import { attachDriveControllerSuite } from './reference/simulationControllerAdapter.js';
 
@@ -41,4 +41,3 @@ if (selector) {
 window.dispatchEvent(new CustomEvent('tensegrity:drive-controller-suite-ready', {
   detail: { controllers: { ...DRIVE_CONTROLLER_LABELS } }
 }));
-

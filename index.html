@@ -160,10 +160,16 @@
 
     .chart-title,
     .section-title {
+      display: flex;
       flex-wrap: wrap;
       align-items: flex-start;
       gap: 0.35rem 1rem;
       line-height: 1.35;
+    }
+    .chart-title {
+      flex: 0 0 auto;
+      justify-content: space-between;
+      margin-bottom: 0.85rem;
     }
     .chart-title > span,
     .section-title > span { min-width: 0; }
@@ -179,12 +185,37 @@
     .data-panel { padding: 1.25rem; }
     .data-panel { max-width: 100%; }
     .data-table { min-width: max-content; }
+    .monitoring-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .monitoring-card {
+      min-width: 0;
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      background: rgba(2, 6, 23, 0.72);
+      border-radius: 0.75rem;
+      padding: 0.8rem;
+    }
+    .monitoring-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+      gap: 0.6rem;
+      align-items: start;
+    }
+    .monitoring-row > span:last-child { text-align: right; overflow-wrap: anywhere; }
+    .learning-card { grid-column: 1 / -1; }
+    .status-stable { color: #4ade80; border-color: rgba(34, 197, 94, 0.6); }
+    .status-moderate { color: #facc15; border-color: rgba(234, 179, 8, 0.6); }
+    .status-danger { color: #fb7185; border-color: rgba(244, 63, 94, 0.7); }
+    .status-goal { color: #67e8f9; border-color: rgba(34, 211, 238, 0.7); box-shadow: 0 0 18px rgba(34, 211, 238, 0.16); }
 
     @media (max-width: 1023px) {
       .app-header { position: static; }
       .main-layout { grid-template-rows: auto auto; }
       .viewport-panel,
       .viewport-canvas { min-height: clamp(500px, 72vh, 680px); }
+      .monitoring-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (max-width: 640px) {
@@ -241,6 +272,7 @@
         padding-left: 0.75rem;
         padding-right: 0.75rem;
       }
+      .monitoring-grid { grid-template-columns: minmax(0, 1fr); }
     }
 
     @media (max-width: 420px) {
@@ -259,6 +291,8 @@
         text-align: left;
       }
       .telemetry-hud { max-height: 48%; overflow-y: auto; }
+      .monitoring-row { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
+      .monitoring-row > span:last-child { text-align: left; }
     }
   </style>
 </head>
@@ -318,16 +352,16 @@
       <div class="terrain-control flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
         <span class="font-semibold text-slate-400">Terrain Level:</span>
         <select id="select-experiment" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
-          <option value="1">Level 1: Smooth Flat Terrain</option>
-          <option value="2">Level 2: Small Rocks Traversal</option>
-          <option value="3">Level 3: Medium Boulders Rolling</option>
-          <option value="4">Level 4: Large Obstacle Climb & Roll Over</option>
-          <option value="5">Level 5: Deep Crater Escape</option>
-          <option value="6">Level 6: Steep Slope Uphill Roll (18°)</option>
-          <option value="7">Level 7: Random Irregular Mars Landscape</option>
-          <option value="8">Level 8: Constant-Speed Rolling Endurance</option>
-          <option value="9">Level 9: Non-Bounce Settling Recovery</option>
-          <option value="10" selected>Level 10: Controlled 50 m A-vs-B Course</option>
+          <option value="1">Level 1: Rough Mars Sand Flats</option>
+          <option value="2">Level 2: Mars Small-Rock Field</option>
+          <option value="3">Level 3: Mars Boulder Field</option>
+          <option value="4">Level 4: Rocky Ridge Climb</option>
+          <option value="5">Level 5: Eroded Mars Crater</option>
+          <option value="6">Level 6: Sandy Mars Slope (18°)</option>
+          <option value="7">Level 7: Irregular Mars Mountains</option>
+          <option value="8">Level 8: Rough-Sand Endurance</option>
+          <option value="9">Level 9: Rocky Settling Recovery</option>
+          <option value="10" selected>Level 10: Learned Mars A-vs-B Mission</option>
         </select>
       </div>
 
@@ -363,6 +397,10 @@
       <!-- Force Overlay Toggle -->
       <button id="btn-toggle-forces" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
         Force Overlay: ON
+      </button>
+
+      <button id="btn-toggle-debug" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
+        IDs: OFF
       </button>
 
       <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-cyan-400">
@@ -476,17 +514,17 @@
           <div>
             <div class="flex justify-between text-slate-300 mb-1">
               <span>Terrain Roughness (RMS):</span>
-              <span id="val-roughness" class="font-mono text-cyan-400">0.04 m</span>
+              <span id="val-roughness" class="font-mono text-cyan-400">0.06 m</span>
             </div>
-            <input id="slider-roughness" type="range" min="0.0" max="0.35" step="0.02" value="0.04" class="w-full accent-cyan-400 cursor-pointer">
+            <input id="slider-roughness" type="range" min="0.0" max="0.35" step="0.01" value="0.06" class="w-full accent-cyan-400 cursor-pointer">
           </div>
 
           <div>
             <div class="flex justify-between text-slate-300 mb-1">
               <span>Target Locomotion Speed:</span>
-              <span id="val-target-speed" class="font-mono text-emerald-400">0.20 m/s reference (not forced)</span>
+              <span id="val-target-speed" class="font-mono text-emerald-400">1.30 m/s rolling target</span>
             </div>
-            <input id="slider-target-speed" type="range" min="0.20" max="0.20" step="0.01" value="0.20" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
+            <input id="slider-target-speed" type="range" min="0.20" max="1.30" step="0.01" value="1.30" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
           </div>
         </div>
       </div>
@@ -499,7 +537,7 @@
         </div>
         <div class="grid grid-cols-3 gap-2 text-[10px] font-mono text-center">
           <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Physics</div><div class="text-emerald-300">500 Hz</div></div>
-          <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Control</div><div class="text-violet-300">20 Hz</div></div>
+          <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Control</div><div id="control-rate-value" class="text-violet-300">50 Hz</div></div>
           <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Render</div><div class="text-cyan-300">≤60 Hz</div></div>
         </div>
         <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
@@ -546,6 +584,135 @@
 
     </div>
   </main>
+
+  <!-- Complete real-time monitoring HUD -->
+  <section class="px-4 pb-0">
+    <div class="glass-panel rounded-2xl p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-bold text-white">Real-Time Mission & Structural Monitoring</h2>
+          <p class="text-[11px] text-slate-400 mt-1">120 s mission deadline · persistent GPS-segment learning · bounded gradient updates after every attempt.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="monitor-status" class="px-3 py-1 rounded-lg border bg-slate-950 text-xs font-bold font-mono status-stable">STABLE</span>
+          <label class="text-[10px] text-slate-400">Goal radius
+            <input id="input-goal-threshold" type="range" min="0.10" max="1.50" step="0.05" value="0.50" class="align-middle w-24 accent-cyan-400">
+            <span id="val-goal-threshold" class="text-cyan-300 font-mono">0.50 m</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="monitoring-grid text-[11px] font-mono">
+        <article class="monitoring-card space-y-1.5">
+          <h3 class="text-cyan-300 font-bold border-b border-slate-800 pb-1">Goal Tracking · A → B</h3>
+          <div class="monitoring-row"><span class="text-slate-500">Start A</span><span id="monitor-start" class="text-slate-200">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Goal B</span><span id="monitor-goal" class="text-emerald-300">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">COM(t)</span><span id="monitor-com" class="text-white">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Goal error</span><span id="monitor-goal-error" class="text-cyan-300">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Remaining X / Y</span><span id="monitor-remaining" class="text-amber-300">—</span></div>
+          <div id="monitor-goal-result" class="mt-2 rounded bg-slate-900 p-2 text-slate-400">Task running</div>
+        </article>
+
+        <article class="monitoring-card space-y-1.5">
+          <h3 class="text-violet-300 font-bold border-b border-slate-800 pb-1">Formation & Health</h3>
+          <div class="monitoring-row"><span class="text-slate-500">Rigid-aligned RMS</span><span id="monitor-formation" class="text-emerald-300">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Indicator</span><span id="monitor-stability" class="text-emerald-300">GREEN · stable</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Max rod error</span><span id="monitor-rod-error" class="text-emerald-300">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Max node separation</span><span id="monitor-node-separation" class="text-slate-200">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Terrain clearance</span><span id="monitor-clearance" class="text-emerald-300">—</span></div>
+          <div id="monitor-warnings" class="mt-2 rounded bg-emerald-950/40 p-2 text-emerald-300">No structural warnings</div>
+        </article>
+
+        <article class="monitoring-card space-y-1.5">
+          <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
+            <h3 class="text-amber-300 font-bold">Cable Inspector</h3>
+            <select id="select-monitor-cable" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-cyan-300"></select>
+          </div>
+          <div class="monitoring-row"><span class="text-slate-500">Connected nodes</span><span id="cable-inspector-nodes">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Rest / current</span><span id="cable-inspector-lengths">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Δ length</span><span id="cable-inspector-delta">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Strain</span><span id="cable-inspector-strain">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Tension</span><span id="cable-inspector-force">—</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">State</span><span id="cable-inspector-state">—</span></div>
+          <div class="grid grid-cols-2 gap-1 pt-1 border-t border-slate-800 text-[10px]">
+            <span>Max / avg force</span><span id="monitor-force-summary" class="text-right">—</span>
+            <span>Max strain</span><span id="monitor-max-strain" class="text-right">—</span>
+            <span>Slack / overload</span><span id="monitor-cable-counts" class="text-right">—</span>
+          </div>
+        </article>
+
+        <article class="monitoring-card space-y-1.5">
+          <h3 class="text-rose-300 font-bold border-b border-slate-800 pb-1">Terrain Contacts</h3>
+          <div class="monitoring-row"><span class="text-slate-500">State</span><span id="monitor-grounded" class="text-slate-200">AIRBORNE</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Active contacts</span><span id="monitor-contact-count" class="text-orange-300">0</span></div>
+          <div class="monitoring-row"><span class="text-slate-500">Node / rod IDs</span><span id="monitor-contact-ids" class="text-orange-300">—</span></div>
+          <div id="monitor-contact-list" class="max-h-28 overflow-y-auto space-y-1 pt-1 border-t border-slate-800 text-[10px] text-slate-300">No active contacts</div>
+        </article>
+
+        <article class="monitoring-card learning-card space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <div>
+              <h3 class="text-emerald-300 font-bold">GPS + Gradient Route Learner</h3>
+              <p class="text-[10px] text-slate-500 mt-0.5">Every win, timeout, or reset updates bounded route, speed, torque, and traction parameters for the next attempt.</p>
+            </div>
+            <div class="flex gap-2">
+              <button id="btn-toggle-auto-learning" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Auto training: ON</button>
+              <button id="btn-clear-learning" class="px-2 py-1 rounded bg-slate-900 text-slate-300 border border-slate-700">Clear learned route</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-1">
+            <div class="monitoring-row"><span class="text-slate-500">Current attempt</span><span id="learning-attempt">1</span></div>
+            <div class="monitoring-row"><span class="text-slate-500">Win / loss record</span><span id="learning-record">0 W / 0 L</span></div>
+            <div class="monitoring-row"><span class="text-slate-500">Best capability time</span><span id="learning-best" class="text-emerald-300">No completed win yet</span></div>
+            <div class="monitoring-row"><span class="text-slate-500">Deadline</span><span class="text-amber-300">120.00 s</span></div>
+            <div class="monitoring-row"><span class="text-slate-500">GPS segment</span><span id="learning-segment" class="text-cyan-300">S01 · waypoint x=0.00 m</span></div>
+            <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Learned command</span><span id="learning-scales">1.000 speed · 1.000 torque · 1.000 grip</span></div>
+            <div class="monitoring-row"><span class="text-slate-500">Last result</span><span id="learning-last-result">Waiting for first completed attempt</span></div>
+            <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Last gradient</span><span id="learning-gradient" class="text-violet-300">Gradient update after win/loss</span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3 text-[10px]">
+        <span class="text-slate-500 mr-1">Export raw logs:</span>
+        <button data-monitor-export="goal_tracking" class="px-2 py-1 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">goal_tracking.csv</button>
+        <button data-monitor-export="formation_metrics" class="px-2 py-1 rounded bg-violet-950 text-violet-300 border border-violet-800">formation_metrics.csv</button>
+        <button data-monitor-export="cable_metrics" class="px-2 py-1 rounded bg-amber-950 text-amber-300 border border-amber-800">cable_metrics.csv</button>
+        <button data-monitor-export="contact_events" class="px-2 py-1 rounded bg-rose-950 text-rose-300 border border-rose-800">contact_events.csv</button>
+        <button data-monitor-export="complete_simulation_log" class="px-2 py-1 rounded bg-slate-800 text-slate-200 border border-slate-700">complete_simulation_log.csv</button>
+        <button id="btn-export-monitor-json" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">complete_log.json</button>
+        <span id="monitor-log-count" class="ml-auto text-slate-500 font-mono">0 raw samples</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Synchronized monitoring charts -->
+  <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>Goal Tracking Error vs Time</span><span class="text-xs text-cyan-400 font-mono">||Goal − COM(t)|| [m]</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-goal-error"></canvas></div>
+    </div>
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>Formation Error vs Time</span><span class="text-xs text-violet-400 font-mono">Rigid-aligned RMS [m]</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-formation-error"></canvas></div>
+    </div>
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>Cable Length Change vs Time</span><span id="chart-cable-delta-label" class="text-xs text-amber-400 font-mono">C01 · ΔL [m]</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-cable-delta"></canvas></div>
+    </div>
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>Cable Force vs Time</span><span id="chart-cable-force-label" class="text-xs text-rose-400 font-mono">C01 · tension [N]</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-cable-force"></canvas></div>
+    </div>
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>Active Contact Count vs Time</span><span class="text-xs text-orange-400 font-mono">Nodes + rods</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-contact-count"></canvas></div>
+    </div>
+    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+      <h3 class="chart-title text-sm font-bold"><span>COM Path · Top Down X–Y</span><span class="text-xs text-emerald-400 font-mono">Project Z axis is vertical</span></h3>
+      <div class="flex-1 relative"><canvas id="chart-com-path"></canvas></div>
+    </div>
+  </section>
 
   <!-- Telemetry Charts Section -->
   <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
@@ -598,11 +765,12 @@
       <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
           <h3 class="text-sm font-bold text-slate-200">Controlled A-vs-B · 50 m Measured Obstacle Course</h3>
-          <p class="text-[11px] text-slate-400 mt-1">Shared deterministic terrain · start y=10 m · finish y=60 m · 12 obstacles · fixed 2 ms physics step</p>
+          <p class="text-[11px] text-slate-400 mt-1">10 irregular rock formations · start y=10 m · finish y=60 m · win before 120 s, otherwise loss · fixed 2 ms physics step</p>
         </div>
         <div class="text-xs font-mono flex flex-wrap gap-3">
           <span>Progress: <strong id="course-progress" class="text-emerald-400">0.0 / 50.0 m</strong></span>
           <span>Obstacle: <strong id="course-current-obstacle" class="text-amber-400">none</strong></span>
+          <span>Crest checkpoints: <strong id="course-checkpoints" class="text-cyan-400">0 / 10</strong></span>
           <span>Phase: <strong id="course-phase" class="text-cyan-400">course approach</strong></span>
         </div>
       </div>
@@ -652,7 +820,7 @@
   </section>
 
   <!-- App Entry Point -->
-  <script type="module" src="./js/app.js?v=20260821-roll1"></script>
+  <script type="module" src="./js/app.js?v=20260821-modela1"></script>
 
 </body>
 </html>

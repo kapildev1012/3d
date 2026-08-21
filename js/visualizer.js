@@ -17,11 +17,14 @@ export class Visualizer {
     this.container = containerElement;
     this.roverModel = roverModel;
     this.terrainModel = terrainModel;
+    this.laneOffset = terrainModel.cfg.modelLaneOffset || 1.5;
     this.options = Object.assign({
       title: 'Simulation View',
       cameraMode: 'chase', // 'chase', 'orbit', 'top', 'side'
       showForceOverlay: true,
-      showGeometryCheckpoint: false
+      showGeometryCheckpoint: false,
+      showDebugLabels: false,
+      selectedCable: 0
     }, options);
 
     this.initThree();
@@ -38,8 +41,8 @@ export class Visualizer {
     const height = this.container.clientHeight || 450;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x070a12);
-    this.scene.fog = new THREE.FogExp2(0x070a12, 0.015);
+    this.scene.background = new THREE.Color(0x24130e);
+    this.scene.fog = new THREE.FogExp2(0x3a1f16, 0.012);
 
     // Camera (Z is UP in physics simulation)
     this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200);
@@ -63,8 +66,8 @@ export class Visualizer {
     this.controls.target.set(0, 3, 1.2);
     this.controls.update();
 
-    // High-tech Lighting Schema
-    const ambLight = new THREE.AmbientLight(0xffffff, 0.65);
+    // Warm, dusty Mars lighting based on the supplied rocky-landscape photo.
+    const ambLight = new THREE.AmbientLight(0xffd5b8, 0.62);
     this.scene.add(ambLight);
 
     const sunLight = new THREE.DirectionalLight(0xffe8d6, 1.5);
@@ -80,7 +83,7 @@ export class Visualizer {
     sunLight.shadow.camera.bottom = -10;
     this.scene.add(sunLight);
 
-    const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x1e1b4b, 0.55);
+    const hemiLight = new THREE.HemisphereLight(0xd99a75, 0x3b1d15, 0.58);
     hemiLight.position.set(0, 0, 15);
     this.scene.add(hemiLight);
 
@@ -111,9 +114,12 @@ export class Visualizer {
     const posAttr = geometry.attributes.position;
     const colors = [];
 
-    // Mars Reddish-Brown Bedrock palette
-    const colorLow = new THREE.Color(0x6e3b1f);
-    const colorHigh = new THREE.Color(0xaf6132);
+    // Photo-matched granular Mars palette: iron-rich sand, sunlit ridges,
+    // and darker exposed stone on steeper faces.
+    const sandShadow = new THREE.Color(0x5a2d20);
+    const sandMid = new THREE.Color(0x99563c);
+    const sandSun = new THREE.Color(0xc47b55);
+    const exposedRock = new THREE.Color(0x3e2924);
 
     for (let i = 0; i < posAttr.count; i++) {
       const localX = posAttr.getX(i);
@@ -121,16 +127,25 @@ export class Visualizer {
       const worldX = localX;
       const worldY = localY + (yMin + yMax) / 2;
 
-      // In comparison mode, show two visually separated copies of the exact
-      // same physical course (A at -1.5 m, B at +1.5 m).
-      const physicsX = this.terrainModel.course
-        ? worldX-(worldX < 0 ? -1.5 : 1.5)
-        : worldX;
-      const surf = this.terrainModel.eval(physicsX, worldY);
+      // Every level is rendered as two independent copies of the same
+      // lane-local physical terrain: A on the left, B on the right. Levels
+      // 1–9 previously sampled unshifted world x here, so visible rocks and
+      // the collision surface disagreed with both rover simulations.
+      const laneOffset = worldX < 0 ? -this.laneOffset : this.laneOffset;
+      const physicsX = worldX-laneOffset;
+      const laneModel = worldX >= 0 ? 'adaptive' : 'fixed';
+      const surf = this.terrainModel.eval(physicsX, worldY, laneModel);
       posAttr.setZ(i, surf.h);
 
-      const ratio = (surf.h + 0.4) / 1.0;
-      const c = colorLow.clone().lerp(colorHigh, Math.max(0, Math.min(1, ratio)));
+      const heightRatio = Math.max(0, Math.min(1, (surf.h+0.28)/0.85));
+      const slope = Math.hypot(surf.dhdx, surf.dhdy);
+      const grainHash = Math.sin(127.1*physicsX+311.7*worldY)*43758.5453;
+      const granularNoise = grainHash-Math.floor(grainHash);
+      const grain = 0.88+0.16*granularNoise;
+      const c = sandShadow.clone().lerp(sandMid, Math.min(1, 0.30+1.1*heightRatio));
+      c.lerp(sandSun, Math.max(0, Math.min(0.55, 0.35*heightRatio)));
+      c.lerp(exposedRock, Math.max(0, Math.min(0.58, (slope-0.20)*0.85)));
+      c.multiplyScalar(Math.max(0.76, grain));
       colors.push(c.r, c.g, c.b);
     }
 
@@ -139,8 +154,8 @@ export class Visualizer {
 
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.90,
-      metalness: 0.1,
+      roughness: 1.0,
+      metalness: 0.0,
       flatShading: true
     });
 
@@ -148,12 +163,6 @@ export class Visualizer {
     this.terrainMesh.position.set(0, (yMin + yMax) / 2, 0);
     this.terrainMesh.receiveShadow = true;
     this.scene.add(this.terrainMesh);
-
-    // Subtle Sci-Fi Grid overlay
-    const grid = new THREE.GridHelper(this.terrainModel.course ? 70 : 50, this.terrainModel.course ? 70 : 50, 0x06b6d4, 0x334155);
-    grid.rotation.x = Math.PI / 2;
-    grid.position.set(0, (yMin+yMax)/2, -0.05);
-    this.scene.add(grid);
 
     // Glowing Finish Line Gate Arch at the configured endpoint.
     const goalY = this.terrainModel.course?.goalY || this.terrainModel.cfg.targetGoalY || 25.0;
@@ -195,6 +204,34 @@ export class Visualizer {
 
     this.scene.add(gateGroup);
 
+    // Explicit task markers for the monitored adaptive lane.
+    const startYMarker = this.terrainModel.course
+      ? this.terrainModel.course.startY-1.0 : 0;
+    const goalTarget = this.terrainModel.cfg.targetDestination || [0, goalY];
+    const taskMarkerGroup = new THREE.Group();
+    const startMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 20, 20),
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 1.0 })
+    );
+    startMarker.position.set(this.laneOffset, startYMarker, this.terrainModel.eval(0, startYMarker, 'adaptive').h+0.18);
+    taskMarkerGroup.add(startMarker);
+    const goalMarker = new THREE.Mesh(
+      new THREE.TorusGeometry(0.30, 0.055, 12, 32),
+      new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x16a34a, emissiveIntensity: 1.2 })
+    );
+    goalMarker.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], this.terrainModel.eval(goalTarget[0], goalTarget[1], 'adaptive').h+0.08);
+    taskMarkerGroup.add(goalMarker);
+    const startLabel = this.createTextSprite('START A', 'rgba(56, 189, 248, 1)');
+    startLabel.scale.set(1.4, 0.35, 1);
+    startLabel.position.set(this.laneOffset, startYMarker, this.terrainModel.eval(0, startYMarker, 'adaptive').h+0.62);
+    taskMarkerGroup.add(startLabel);
+    const goalLabel = this.createTextSprite('GOAL B', 'rgba(34, 197, 94, 1)');
+    goalLabel.scale.set(1.4, 0.35, 1);
+    goalLabel.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], this.terrainModel.eval(goalTarget[0], goalTarget[1], 'adaptive').h+0.62);
+    taskMarkerGroup.add(goalLabel);
+    this.taskMarkerGroup = taskMarkerGroup;
+    this.scene.add(taskMarkerGroup);
+
     if (this.terrainModel.course) {
       const startY = this.terrainModel.course.startY;
       const startMaterial = new THREE.MeshBasicMaterial({
@@ -204,35 +241,160 @@ export class Visualizer {
       startLine.position.set(0, startY, this.terrainModel.eval(0, startY).h+0.025);
       this.scene.add(startLine);
 
-      const ringGeometry = new THREE.RingGeometry(0.31, 0.36, 32);
-      const ringMaterial = new THREE.MeshBasicMaterial({
-        color: 0xf59e0b, side: THREE.DoubleSide, transparent: true, opacity: 0.78
-      });
-      for (const obstacle of this.terrainModel.course.obstacles) {
-        for (const laneOffset of [-1.5, 1.5]) {
-          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-          ring.scale.set(obstacle.radiusX/0.36, obstacle.radiusY/0.36, 1);
-          ring.position.set(obstacle.x+laneOffset, obstacle.y,
-            this.terrainModel.eval(obstacle.x, obstacle.y).h+0.018);
-          this.scene.add(ring);
+      // Build every benchmark obstacle from a small cluster of embedded
+      // low-poly shards. The physical terrain underneath uses the same
+      // asymmetric obstacle profile, while these varied facets remove the
+      // former round, manufactured-looking silhouette.
+      for (let obstacleIndex = 0; obstacleIndex < this.terrainModel.course.obstacles.length; obstacleIndex++) {
+        const obstacle = this.terrainModel.course.obstacles[obstacleIndex];
+        for (const laneOffset of [-this.laneOffset, this.laneOffset]) {
+          for (let shard = 0; shard < 5; shard++) {
+            const angle = obstacle.yaw+shard*2.39996+obstacleIndex*0.47;
+            const radial = shard === 0 ? 0 : 0.18+0.10*((shard+obstacleIndex)%3);
+            const localX = obstacle.x+radial*obstacle.radiusX*Math.cos(angle);
+            const localY = obstacle.y+radial*obstacle.radiusY*Math.sin(angle);
+            const shardHeight = obstacle.height*(shard === 0 ? 0.34 : 0.18+0.035*((shard+2*obstacleIndex)%3));
+            const surface = this.terrainModel.eval(localX, localY);
+            const geometry = shard%2 === 0
+              ? new THREE.DodecahedronGeometry(1, 0)
+              : new THREE.IcosahedronGeometry(1, 0);
+            const material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(0x382923).lerp(
+                new THREE.Color(0x76503d), 0.18+0.10*((shard+obstacleIndex)%4)),
+              roughness: 1.0,
+              metalness: 0.0,
+              flatShading: true
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            const widthScale = obstacle.radiusX*(shard === 0 ? 0.38 : 0.23+0.035*(shard%3));
+            const depthScale = obstacle.radiusY*(shard === 0 ? 0.31 : 0.20+0.03*((shard+1)%3));
+            mesh.scale.set(widthScale, depthScale, shardHeight);
+            // Z-only rotation keeps every facet below the analytic solid
+            // surface; x/y tilt used to lift corners above collision height.
+            mesh.rotation.set(0, 0, angle);
+            mesh.position.set(localX+laneOffset, localY, surface.h-shardHeight);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            this.scene.add(mesh);
+          }
+        }
+
+        // Model B's mandatory sequential crest target. The controller unlocks
+        // B1…B10 in order, then proceeds to the final GOAL B marker.
+        const checkpointRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.24, 0.035, 10, 26),
+          new THREE.MeshStandardMaterial({
+            color: 0x22d3ee,
+            emissive: 0x0891b2,
+            emissiveIntensity: 1.35,
+            roughness: 0.35
+          })
+        );
+        checkpointRing.position.set(
+          obstacle.x+this.laneOffset,
+          obstacle.y,
+          this.terrainModel.eval(obstacle.x, obstacle.y, 'adaptive').h+0.06
+        );
+        this.scene.add(checkpointRing);
+        const checkpointLabel = this.createTextSprite(`B${obstacleIndex+1}`, 'rgba(34, 211, 238, 1)');
+        checkpointLabel.scale.set(0.72, 0.22, 1);
+        checkpointLabel.position.set(
+          obstacle.x+this.laneOffset,
+          obstacle.y,
+          this.terrainModel.eval(obstacle.x, obstacle.y, 'adaptive').h+0.38
+        );
+        this.scene.add(checkpointLabel);
+      }
+    }
+
+    // Render embedded low-poly Martian stones and broken mountain ridges.
+    if (this.terrainModel.rocks) {
+      for (let rock of this.terrainModel.rocks) {
+        const rockGeom = new THREE.DodecahedronGeometry(1, 0);
+        const shade = new THREE.Color(0x35241f).lerp(
+          new THREE.Color(0x704331), 0.25+0.45*(rock.colorSeed ?? 0.5));
+        const rockMat = new THREE.MeshStandardMaterial({
+          color: shade,
+          roughness: 1.0,
+          metalness: 0.0,
+          flatShading: true
+        });
+        const offsets = [-this.laneOffset, this.laneOffset];
+        for (const laneOffset of offsets) {
+          const worldX = rock.x+laneOffset;
+          // The two terrain copies meet at x=0. Do not draw a side-scene
+          // rock after its lane offset carries it across that boundary,
+          // where the mesh would have no matching physical height field.
+          if ((laneOffset < 0 && worldX >= 0) || (laneOffset > 0 && worldX < 0)) continue;
+          const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
+          const rockMesh = new THREE.Mesh(rockGeom, rockMat);
+          const rx = rock.rx || rock.r || 0.2;
+          const ry = rock.ry || rock.r || 0.2;
+          const renderedHeight = Math.max(0.06, 0.72*rock.h);
+          rockMesh.scale.set(rx, ry, renderedHeight);
+          rockMesh.rotation.z = rock.yaw || 0;
+          rockMesh.rotation.x = 0;
+          const crest = this.terrainModel.eval(rock.x, rock.y, modelType).h || 0;
+          // Embed the complete mesh below the analytic collision crest.
+          rockMesh.position.set(worldX, rock.y, crest-renderedHeight);
+          rockMesh.castShadow = true;
+          rockMesh.receiveShadow = true;
+          this.scene.add(rockMesh);
         }
       }
     }
 
-    // Render Boulders & Rocks
-    if (this.terrainModel.rocks) {
-      for (let rock of this.terrainModel.rocks) {
-        const rockGeom = new THREE.DodecahedronGeometry(rock.r, 1);
+    // Extra embedded rocks appear only on Model B's right-hand path. Their
+    // mesh positions use the same adaptive terrain query as B's contact
+    // solver, so the rendered stone and the physical surface stay aligned.
+    if (this.terrainModel.course && this.terrainModel.bPathRocks) {
+      for (const rock of this.terrainModel.bPathRocks) {
+        const rockGeom = new THREE.DodecahedronGeometry(1, 0);
         const rockMat = new THREE.MeshStandardMaterial({
-          color: 0x8b5cf6, // Glowing violet accent boulder
-          roughness: 0.8,
-          metalness: 0.2
+          color: new THREE.Color(0x2f2522).lerp(
+            new THREE.Color(0x684536), 0.22+0.34*(rock.colorSeed ?? 0.5)),
+          roughness: 1.0,
+          metalness: 0.0,
+          flatShading: true
         });
         const rockMesh = new THREE.Mesh(rockGeom, rockMat);
-        rockMesh.position.set(rock.x, rock.y, rock.h * 0.4 + (this.terrainModel.eval(rock.x, rock.y).h || 0));
+        const renderedHeight = Math.max(0.035, 0.74*rock.h);
+        rockMesh.scale.set(rock.rx, rock.ry, renderedHeight);
+        rockMesh.rotation.z = rock.yaw || 0;
+        rockMesh.rotation.x = 0;
+        const crest = this.terrainModel.eval(rock.x, rock.y, 'adaptive').h || 0;
+        rockMesh.position.set(rock.x+this.laneOffset, rock.y, crest-renderedHeight);
         rockMesh.castShadow = true;
         rockMesh.receiveShadow = true;
         this.scene.add(rockMesh);
+      }
+    }
+
+    // Physical coarse-sand grains embedded in every obstacle. These meshes
+    // correspond to the same Gaussian micro-outcrops used by the solver and
+    // make the high-friction summit surface visibly granular.
+    if (this.terrainModel.course && this.terrainModel.courseGritRocks) {
+      for (const grain of this.terrainModel.courseGritRocks) {
+        const geometry = new THREE.IcosahedronGeometry(1, 0);
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(0x4a3026).lerp(
+            new THREE.Color(0x8a5a40), 0.18+0.22*(grain.colorSeed ?? 0.5)),
+          roughness: 1.0,
+          metalness: 0.0,
+          flatShading: true
+        });
+        for (const laneOffset of [-this.laneOffset, this.laneOffset]) {
+          const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
+          const mesh = new THREE.Mesh(geometry, material);
+          const renderedHeight = Math.max(0.012, 0.72*grain.h);
+          mesh.scale.set(grain.rx, grain.ry, renderedHeight);
+          mesh.rotation.set(0, 0, grain.yaw);
+          const surface = this.terrainModel.eval(grain.x, grain.y, modelType).h;
+          mesh.position.set(grain.x+laneOffset, grain.y, surface-renderedHeight);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          this.scene.add(mesh);
+        }
       }
     }
   }
@@ -245,12 +407,15 @@ export class Visualizer {
       B: { nodeMeshes: [], strutMeshes: [], outerCableMeshes: [], coreCableMeshes: [], coreMesh: null }
     };
     const unitCylGeom = new THREE.CylinderGeometry(1, 1, 1, 12);
-    const nodeGeom = new THREE.SphereGeometry(0.06, 18, 18);
+    // Render the same physical radii used by the contact solver. Visual-only
+    // thickness made Model A appear buried even when its mathematical cable
+    // centreline was clear of the terrain.
+    const nodeGeom = new THREE.SphereGeometry(this.roverModel.cfg.nodeRadius, 18, 18);
 
     const createModelMeshes = (modelKey, colorTint) => {
       const m = this.models[modelKey];
-      const nodeMat = new THREE.MeshStandardMaterial({ color: colorTint.node, metalness: 0.8, roughness: 0.2, emissive: colorTint.nodeE, emissiveIntensity: 0.5 });
       for (let i = 0; i < this.roverModel.nOuter; i++) {
+        const nodeMat = new THREE.MeshStandardMaterial({ color: colorTint.node, metalness: 0.8, roughness: 0.2, emissive: colorTint.nodeE, emissiveIntensity: 0.5 });
         const nodeMesh = new THREE.Mesh(nodeGeom, nodeMat);
         nodeMesh.castShadow = true;
         this.scene.add(nodeMesh);
@@ -308,13 +473,35 @@ export class Visualizer {
     this.scene.add(this.comMarker);
 
     this.contactMarkers = [];
+    this.contactForceArrows = [];
     const contactGeometry = new THREE.SphereGeometry(0.085, 14, 14);
-    for (let i = 0; i < this.roverModel.nOuter; i++) {
-      const marker = new THREE.Mesh(contactGeometry, new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.72 }));
+    const maximumContacts = this.roverModel.nOuter+this.roverModel.bars.length;
+    for (let i = 0; i < maximumContacts; i++) {
+      const marker = new THREE.Mesh(contactGeometry, new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.88 }));
       marker.visible = false;
       this.scene.add(marker);
       this.contactMarkers.push(marker);
+      const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 0.3, 0xfb7185, 0.09, 0.045);
+      arrow.visible = false;
+      this.scene.add(arrow);
+      this.contactForceArrows.push(arrow);
     }
+
+    this.debugGroup = new THREE.Group();
+    this.nodeLabels = [];
+    this.cableLabels = [];
+    for (let node = 0; node < this.roverModel.nOuter; node++) {
+      const label = this.createDebugLabel(`N${node+1}`, '#67e8f9');
+      this.nodeLabels.push(label);
+      this.debugGroup.add(label);
+    }
+    for (let cable = 0; cable < this.roverModel.outerStrings.length; cable++) {
+      const label = this.createDebugLabel(`C${String(cable+1).padStart(2, '0')}`, '#fef08a');
+      this.cableLabels.push(label);
+      this.debugGroup.add(label);
+    }
+    this.debugGroup.visible = this.options.showDebugLabels;
+    this.scene.add(this.debugGroup);
 
     this.supportFaceMesh = new THREE.Mesh(
       new THREE.BufferGeometry(),
@@ -341,20 +528,37 @@ export class Visualizer {
     this.scene.add(this.stateSprite);
   }
 
-  createTextSprite(message) {
+  createTextSprite(message, color = 'rgba(16, 185, 129, 1.0)') {
     const canvas = document.createElement('canvas');
     canvas.width = 512; canvas.height = 128;
     const context = canvas.getContext('2d');
     context.font = "Bold 36px monospace";
-    context.fillStyle = "rgba(0,0,0,0.5)";
+    context.fillStyle = "rgba(0,0,0,0.32)";
     context.fillRect(0,0,canvas.width,canvas.height);
-    context.fillStyle = "rgba(16, 185, 129, 1.0)";
+    context.fillStyle = color;
     context.textAlign = "center";
     context.fillText(message, 256, 75);
     const texture = new THREE.CanvasTexture(canvas);
     const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
     const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.scale.set(3.0, 0.75, 1.0);
+    sprite.scale.set(2.2, 0.55, 1.0);
+    return sprite;
+  }
+
+  createDebugLabel(message, color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 192; canvas.height = 64;
+    const context = canvas.getContext('2d');
+    context.fillStyle = 'rgba(2, 6, 23, 0.82)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = color;
+    context.strokeRect(1, 1, canvas.width-2, canvas.height-2);
+    context.font = 'Bold 30px monospace';
+    context.fillStyle = color;
+    context.textAlign = 'center';
+    context.fillText(message, canvas.width/2, 42);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false }));
+    sprite.scale.set(0.42, 0.14, 1);
     return sprite;
   }
 
@@ -398,9 +602,18 @@ export class Visualizer {
       const m = this.models[modelKey];
       const contracting = new Set(diag.contractingCableIndices || []);
       const relaxing = new Set(diag.relaxingCableIndices || []);
+      const contactNodes = new Set((diag.contacts || [])
+        .filter(contact => contact.kind === 'node')
+        .map(contact => contact.nodeIndex));
 
       for (let i = 0; i < this.roverModel.nOuter; i++) {
         m.nodeMeshes[i].position.set(q[i][0] + offsetX, q[i][1], q[i][2]);
+        if (modelKey === 'B') {
+          const contacting = contactNodes.has(i);
+          m.nodeMeshes[i].material.color.setHex(contacting ? 0xff4d00 : 0x38bdf8);
+          m.nodeMeshes[i].material.emissive.setHex(contacting ? 0xdc2626 : 0x0284c7);
+          m.nodeMeshes[i].material.emissiveIntensity = contacting ? 1.4 : 0.5;
+        }
       }
 
       for (let b = 0; b < this.roverModel.bars.length; b++) {
@@ -438,11 +651,27 @@ export class Visualizer {
 
         const dir = new THREE.Vector3().subVectors(pB, pA);
         const len = dir.length();
+        const cableTelemetry = diag.cableTelemetry?.[s];
+        const forceRatio = cableTelemetry
+          ? clamp01(cableTelemetry.force/Math.max(1, diag.monitoring?.maximumCableForce || 1)) : 0;
         item.mesh.scale.set(item.radius, len, item.radius);
         item.mesh.position.copy(pA.clone().add(pB).multiplyScalar(0.5));
         if (len > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, dir.normalize());
 
-        if (this.options.showForceOverlay && diag.outerCableActuated && modelKey === 'B') {
+        if (this.options.showForceOverlay && modelKey === 'B' && cableTelemetry) {
+          const selected = s === this.options.selectedCable;
+          const colors = {
+            slack: [0xa855f7, 0x7e22ce],
+            overload: [0xef4444, 0xdc2626],
+            high: [0xf97316, 0xea580c],
+            moderate: [0xfacc15, 0xca8a04],
+            nominal: [0x22c55e, 0x059669]
+          };
+          const [color, emissive] = colors[cableTelemetry.state] || colors.nominal;
+          item.material.color.setHex(selected ? 0xffffff : color);
+          item.material.emissive.setHex(selected ? 0x67e8f9 : emissive);
+          item.material.emissiveIntensity = selected ? 1.8 : 0.55+0.8*forceRatio;
+        } else if (this.options.showForceOverlay && diag.outerCableActuated && modelKey === 'B') {
           const isAct = diag.outerCableActuated[s];
           const tension = diag.outerCableForces ? diag.outerCableForces[s] : 0;
           const isRelaxed = diag.outerCableRelaxed?.[s];
@@ -474,13 +703,14 @@ export class Visualizer {
       }
     };
 
-    updateModel('A', dualSimState.simA, -1.5);
-    updateModel('B', dualSimState.simB, 1.5);
+    updateModel('A', dualSimState.simA, -this.laneOffset);
+    updateModel('B', dualSimState.simB, this.laneOffset);
 
     this.trailFrame++;
     if (this.trailFrame % 8 === 0) {
       for (const [modelKey, state, offsetX] of [
-        ['A', dualSimState.simA, -1.5], ['B', dualSimState.simB, 1.5]
+        ['A', dualSimState.simA, -this.laneOffset],
+        ['B', dualSimState.simB, this.laneOffset]
       ]) {
         const centroid = state.diag.centroid;
         const trail = this.trails[modelKey];
@@ -493,17 +723,45 @@ export class Visualizer {
     }
 
     const refPosB = dualSimState.simB.diag.centroid || [0, 0, 0];
-    const refPosB_World = [refPosB[0] + 1.5, refPosB[1], refPosB[2]];
+    const refPosB_World = [refPosB[0]+this.laneOffset, refPosB[1], refPosB[2]];
     const payloadCore = dualSimState.simB.diag.corePosition || refPosB;
-    this.comMarker.position.set(payloadCore[0]+1.5, payloadCore[1], payloadCore[2]);
+    this.comMarker.position.set(payloadCore[0]+this.laneOffset, payloadCore[1], payloadCore[2]);
 
-    const contactSet = new Set(dualSimState.simB.diag.groundContactNodes || []);
+    const activeContacts = dualSimState.simB.diag.contacts || [];
     for (let i = 0; i < this.contactMarkers.length; i++) {
       const marker = this.contactMarkers[i];
-      marker.visible = contactSet.has(i);
-      if (marker.visible) {
-        const position = dualSimState.simB.q[i];
-        marker.position.set(position[0]+1.5, position[1], position[2]);
+      const arrow = this.contactForceArrows[i];
+      const contact = activeContacts[i];
+      marker.visible = Boolean(contact);
+      arrow.visible = Boolean(contact);
+      if (contact) {
+        marker.position.set(contact.position[0]+this.laneOffset, contact.position[1], contact.position[2]+0.03);
+        const normalForce = contact.normalForce || 0;
+        const resultant = contact.normal.map((value, axis) =>
+          value*normalForce+(contact.frictionForce?.[axis] || 0));
+        const magnitude = Math.hypot(...resultant);
+        const direction = magnitude > 1e-9 ? resultant.map(value => value/magnitude) : contact.normal;
+        arrow.position.copy(marker.position);
+        arrow.setDirection(new THREE.Vector3(...direction));
+        arrow.setLength(Math.min(1.2, 0.12+0.12*Math.sqrt(Math.max(0, magnitude))), 0.10, 0.05);
+        const overload = normalForce > 0.25*(dualSimState.simB.diag.monitoring?.maximumCableForce || 900);
+        marker.material.color.setHex(overload ? 0xef4444 : 0xf97316);
+      }
+    }
+
+    if (this.debugGroup) {
+      this.debugGroup.visible = this.options.showDebugLabels;
+      if (this.debugGroup.visible) {
+        for (let node = 0; node < this.nodeLabels.length; node++) {
+          const position = dualSimState.simB.q[node];
+          this.nodeLabels[node].position.set(position[0]+this.laneOffset, position[1], position[2]+0.16);
+        }
+        for (let cable = 0; cable < this.cableLabels.length; cable++) {
+          const [first, second] = this.roverModel.outerStrings[cable];
+          const a = dualSimState.simB.q[first];
+          const b = dualSimState.simB.q[second];
+          this.cableLabels[cable].position.set(0.5*(a[0]+b[0])+this.laneOffset, 0.5*(a[1]+b[1]), 0.5*(a[2]+b[2])+0.05);
+        }
       }
     }
 
@@ -511,7 +769,7 @@ export class Visualizer {
     if (supportFace.length === 3) {
       const points = supportFace.map(node => {
         const position = dualSimState.simB.q[node];
-        return new THREE.Vector3(position[0]+1.5, position[1], position[2]+0.006);
+        return new THREE.Vector3(position[0]+this.laneOffset, position[1], position[2]+0.006);
       });
       const oldGeometry = this.supportFaceMesh.geometry;
       this.supportFaceMesh.geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -527,7 +785,7 @@ export class Visualizer {
     if (targetEdge.length === 2) {
       const points = targetEdge.map(node => {
         const position = dualSimState.simB.q[node];
-        return new THREE.Vector3(position[0]+1.5, position[1], position[2]+0.018);
+        return new THREE.Vector3(position[0]+this.laneOffset, position[1], position[2]+0.018);
       });
       const oldGeometry = this.tippingEdgeLine.geometry;
       this.tippingEdgeLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -537,7 +795,9 @@ export class Visualizer {
       this.tippingEdgeLine.visible = false;
     }
 
-    const stateStr = `${dualSimState.simB.diag.obstaclePhase || dualSimState.simB.diag.state || 'ROLLING'} · ${dualSimState.simB.diag.activeObstacleId || 'course'}`;
+    const stateStr = this.terrainModel.course
+      ? `${dualSimState.simB.diag.obstaclePhase || dualSimState.simB.diag.state || 'ROLLING'} · ${dualSimState.simB.diag.activeObstacleId || 'course'}`
+      : `${dualSimState.simB.diag.state || 'ROLLING'}`;
     if (this.stateSprite && stateStr !== this.stateSpriteMessage) {
       this.scene.remove(this.stateSprite);
       this.stateSprite.material.map.dispose();
@@ -580,7 +840,7 @@ export class Visualizer {
 
     const predictedPath = dualSimState.simB.diag.predictedPath || [];
     if (predictedPath.length >= 2) {
-      const points = predictedPath.map(point => new THREE.Vector3(point[0]+1.5, point[1], point[2]+0.08));
+      const points = predictedPath.map(point => new THREE.Vector3(point[0]+this.laneOffset, point[1], point[2]+0.08));
       const oldGeometry = this.predictionLine.geometry;
       this.predictionLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
       oldGeometry.dispose();
@@ -591,7 +851,7 @@ export class Visualizer {
     }
 
     if (this.options.cameraMode === 'chase') {
-      const cx = (dualSimState.simA.diag.centroid[0] - 1.5 + refPosB_World[0]) / 2.0;
+      const cx = (dualSimState.simA.diag.centroid[0]-this.laneOffset+refPosB_World[0])/2.0;
       const cy = (dualSimState.simA.diag.centroid[1] + refPosB_World[1]) / 2.0;
       const cz = (dualSimState.simA.diag.centroid[2] + refPosB_World[2]) / 2.0;
       this.controls.target.set(cx, cy, cz);
@@ -614,4 +874,15 @@ export class Visualizer {
     this.options.showGeometryCheckpoint = visible;
     if (this.checkpointGroup) this.checkpointGroup.visible = visible;
   }
+
+  toggleDebugLabels(visible) {
+    this.options.showDebugLabels = visible;
+    if (this.debugGroup) this.debugGroup.visible = visible;
+  }
+
+  setSelectedCable(index) {
+    this.options.selectedCable = Number.isFinite(index) ? index : 0;
+  }
 }
+
+const clamp01 = value => Math.max(0, Math.min(1, value));

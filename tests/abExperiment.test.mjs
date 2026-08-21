@@ -15,11 +15,15 @@ test('course is deterministic and spans the prescribed 50 m measured section', (
   assert.equal(courseA.startY, 10);
   assert.equal(courseA.goalY, 60);
   assert.equal(courseA.goalY-courseA.startY, 50);
-  assert.equal(courseA.obstacles.length, 12);
+  assert.equal(courseA.obstacles.length, 10);
+  assert.equal(courseA.obstacleHeightRatio, 0.5);
+  assert.ok(courseA.obstacles.every(obstacle => obstacle.height === 0.5));
+  assert.ok(createABCourse(2).obstacles.every(obstacle => obstacle.height === 1),
+    'obstacle height must remain exactly half of rover diameter');
   assert.ok(courseA.obstacles.every(obstacle => obstacle.y > 10 && obstacle.y < 60));
   for (let bandStart = 10; bandStart < 60; bandStart += 10) {
     const count = courseA.obstacles.filter(obstacle => obstacle.y >= bandStart && obstacle.y < bandStart+10).length;
-    assert.ok(count >= 2 && count <= 3, `expected 2–3 obstacles in ${bandStart}–${bandStart+10} m, got ${count}`);
+    assert.equal(count, 2, `expected 2 obstacles in ${bandStart}–${bandStart+10} m, got ${count}`);
   }
 });
 
@@ -30,6 +34,23 @@ test('obstacle surface is smooth, compact and reaches its specified crest', () =
   assert.ok(Math.abs(crest.dhdx) < 1e-12);
   assert.ok(Math.abs(crest.dhdy) < 1e-12);
   assert.deepEqual(evaluateCourseObstacle(obstacle, obstacle.x+2*obstacle.radiusX, obstacle.y), { h: 0, dhdx: 0, dhdy: 0 });
+});
+
+test('all ten obstacle footprints are asymmetric instead of round', () => {
+  const course = createABCourse();
+  assert.equal(course.obstacles.length, 10);
+  assert.ok(course.obstacles.every(obstacle =>
+    ['jagged-rock', 'eroded-block', 'tilted-slab', 'broken-ridge'].includes(obstacle.type)));
+  for (const obstacle of course.obstacles) {
+    const forward = evaluateCourseObstacle(obstacle,
+      obstacle.x+0.55*obstacle.radiusX*Math.cos(obstacle.yaw),
+      obstacle.y+0.55*obstacle.radiusX*Math.sin(obstacle.yaw));
+    const backward = evaluateCourseObstacle(obstacle,
+      obstacle.x-0.55*obstacle.radiusX*Math.cos(obstacle.yaw),
+      obstacle.y-0.55*obstacle.radiusX*Math.sin(obstacle.yaw));
+    assert.ok(Math.abs(forward.h-backward.h) > 1e-4,
+      `${obstacle.id} remained mirror-symmetric`);
+  }
 });
 
 test('sensing selects the next obstacle and proportional adaptation stays bounded', () => {
@@ -49,9 +70,12 @@ test('OVER and AROUND are explicitly distinguished; B around is a violation', ()
   const course = createABCourse();
   const obstacle = course.obstacles[0];
   const overTracker = new ObstaclePassTracker(course, 'adaptive');
-  overTracker.update({ x: obstacle.x, y: obstacle.y, z: 0.65, baseHeight: 0 });
+  overTracker.update({ x: obstacle.x, y: obstacle.y, z: 0.95, baseHeight: 0 });
   const over = overTracker.update({ x: obstacle.x, y: obstacle.y+obstacle.radiusY+0.6, z: 0.55, baseHeight: 0 });
   assert.equal(over.records[0].status, 'over');
+  assert.equal(over.records[0].crestReached, true);
+  assert.equal(over.checkpointsReached, 1);
+  assert.equal(over.nextCheckpointId, 'O02');
   assert.equal(over.bypassViolations, 0);
 
   const aroundTracker = new ObstaclePassTracker(course, 'adaptive');
@@ -59,6 +83,7 @@ test('OVER and AROUND are explicitly distinguished; B around is a violation', ()
   const around = aroundTracker.update({ x: obstacle.x+obstacle.radiusX+0.8, y: obstacle.y+obstacle.radiusY+0.6, z: 0.55, baseHeight: 0 });
   assert.equal(around.records[0].status, 'around');
   assert.equal(around.bypassViolations, 1);
+  assert.equal(around.checkpointsReached, 0);
 });
 
 test('small, medium and large obstacle profiles remain finite and traversable', () => {
@@ -86,7 +111,7 @@ test('recovery attempts are counted without changing obstacle geometry', () => {
   assert.equal(JSON.stringify(course.obstacles), snapshot);
 });
 
-test('synthetic full-course centreline traversal validates all 12 as OVER', () => {
+test('synthetic full-course centreline traversal validates all 10 as OVER', () => {
   const course = createABCourse();
   const tracker = new ObstaclePassTracker(course, 'adaptive');
   for (const obstacle of course.obstacles) {
@@ -99,7 +124,9 @@ test('synthetic full-course centreline traversal validates all 12 as OVER', () =
     });
   }
   const result = tracker.summary();
-  assert.equal(result.over, 12);
+  assert.equal(result.over, 10);
   assert.equal(result.around, 0);
   assert.equal(result.bypassViolations, 0);
+  assert.equal(result.checkpointsReached, 10);
+  assert.equal(result.allCheckpointsReached, true);
 });

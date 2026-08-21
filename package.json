@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "python3 -m http.server 3000 --bind 127.0.0.1",
-    "build": "node --check js/abExperiment.js && node --check js/driveControllers.js && node --check js/simEngine.js && node --check js/visualizer.js && node --check js/app.js && npm test",
+    "build": "node --check js/abExperiment.js && node --check js/adaptiveLearning.js && node --check js/driveControllers.js && node --check js/monitoringSystem.js && node --check js/simEngine.js && node --check js/visualizer.js && node --check js/app.js && npm test",
     "preview": "python3 -m http.server 3000 --bind 127.0.0.1",
     "test": "node --test tests/*.test.mjs"
   }

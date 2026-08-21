@@ -2,9 +2,10 @@
  * APP.JS - Main Coordinator for 6-Bar Tensegrity Icosahedron Rover Simulator
  */
 
-import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer, BenchmarkEngine } from './simEngine.js?v=20260821-roll1';
+import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer, BenchmarkEngine } from './simEngine.js?v=20260821-modela1';
 import { relaxedCableTension } from './driveControllers.js?v=20260821-forward1';
-import { Visualizer } from './visualizer.js?v=20260821-forward1';
+import { Visualizer } from './visualizer.js?v=20260821-modela1';
+import { AdaptiveRouteLearner } from './adaptiveLearning.js?v=20260821-learning1';
 
 const Chart = window.Chart;
 
@@ -20,28 +21,52 @@ function movingAverage(values, windowSize) {
   return result;
 }
 
+const formatVector = (vector, digits = 2) => vector?.length
+  ? `(${vector.map(value => Number(value).toFixed(digits)).join(', ')}) m` : '—';
+
+function downloadText(filename, contents, mimeType = 'text/csv;charset=utf-8') {
+  const blob = new Blob([contents], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const EXPERIMENT_NAMES = [
-  "Level 1: Smooth Flat Terrain → Forward Rolling",
-  "Level 2: Small Rocks Traversal",
-  "Level 3: Medium Boulders Rolling",
-  "Level 4: Large Obstacle Climb & Roll Over",
-  "Level 5: Deep Crater Escape",
-  "Level 6: Steep Slope Uphill Roll (18°)",
-  "Level 7: Random Irregular Mars Landscape",
-  "Level 8: Constant-Speed Rolling Endurance",
-  "Level 9: Non-Bounce Settling Recovery",
-  "Level 10: Multi-Obstacle Robustness Benchmark"
+  "Level 1: Rough Mars Sand Flats → Forward Rolling",
+  "Level 2: Mars Small-Rock Field",
+  "Level 3: Mars Boulder Field Rolling",
+  "Level 4: Rocky Ridge Climb & Roll Over",
+  "Level 5: Eroded Mars Crater Escape",
+  "Level 6: Sandy Mars Slope Uphill Roll (18°)",
+  "Level 7: Irregular Mars Mountain Landscape",
+  "Level 8: Rough-Sand Rolling Endurance",
+  "Level 9: Rocky Non-Bounce Settling Recovery",
+  "Level 10: Learned Mars Multi-Obstacle Mission"
 ];
+
+const MARS_ROUGHNESS_BY_LEVEL = [0, 0.035, 0.05, 0.07, 0.09, 0.075, 0.06, 0.10, 0.10, 0.10, 0.06];
 
 class App {
   constructor() {
     this.simSpeed = 1.0;
     this.isPlaying = true;
     this.isGeometryCheckpointMode = false; // Start in active Locomotion Simulation Mode!
+    this.showDebugLabels = false;
+    this.selectedCableIndex = 0;
+    this.autoLearningEnabled = true;
+    this.learningRestartAt = null;
+    this.learningStorageKey = 'tensegrity-route-learning-v1';
+    this.lastPersistedLearningRevision = -1;
 
     this.initSimulation();
     this.initVisualizer();
     this.initCharts();
+    this.initMonitoringControls();
     this.bindEvents();
 
     // Start rendering immediately. The controlled A-vs-B table is populated
@@ -58,24 +83,50 @@ class App {
       actuationMode: 'roll_forward',
       abCourseEnabled: true,
       targetDestination: [0, 60],
-      targetGoalY: 60,
-      T_end: 320
-    });
+      targetGoalY: 60
+    }).applyLevel10PerformanceProfile();
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
+    this.routeLearner = new AdaptiveRouteLearner({
+      deadlineSeconds: this.cfg.missionDeadlineSeconds,
+      courseStartY: this.cfg.courseStartY,
+      courseGoalY: this.cfg.courseGoalY,
+      baseTargetSpeed: this.cfg.targetSpeed
+    }, this.loadRouteLearning());
 
     // Model A: Fixed Tensegrity Baseline
     this.simA = new Simulation(this.cfg, this.rover, this.terrain, 'fixed');
 
     // Model B: Adaptive Tension & Deformation
-    this.simB = new Simulation(this.cfg, this.rover, this.terrain, 'adaptive');
+    this.simB = new Simulation(this.cfg, this.rover, this.terrain, 'adaptive', this.routeLearner);
+  }
+
+  loadRouteLearning() {
+    try {
+      const raw = window.localStorage.getItem(this.learningStorageKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  persistRouteLearning() {
+    if (!this.routeLearner || this.routeLearner.revision === this.lastPersistedLearningRevision) return;
+    try {
+      window.localStorage.setItem(this.learningStorageKey, JSON.stringify(this.routeLearner.serialize()));
+      this.lastPersistedLearningRevision = this.routeLearner.revision;
+    } catch {
+      // Learning still works in memory when storage is unavailable.
+    }
   }
 
   initVisualizer() {
     const container = document.getElementById('canvas-container-main');
     this.vis = new Visualizer(container, this.rover, this.terrain, {
       showForceOverlay: true,
-      showGeometryCheckpoint: this.isGeometryCheckpointMode
+      showGeometryCheckpoint: this.isGeometryCheckpointMode,
+      showDebugLabels: this.showDebugLabels,
+      selectedCable: this.selectedCableIndex
     });
   }
 
@@ -143,7 +194,7 @@ class App {
         animation: false,
         scales: {
           x: { title: { display: true, text: 'Time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { title: { display: true, text: 'Speed / RMS [fixed scale]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, min: 0, max: 0.50 }
+          y: { title: { display: true, text: 'Speed / RMS [fixed scale]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, min: 0, max: 1.40 }
         },
         plugins: { legend: { labels: { color: '#f8fafc' } } }
       }
@@ -195,6 +246,76 @@ class App {
       }
     });
     this.updateForceLawChart();
+    this.initMonitoringCharts();
+  }
+
+  initMonitoringCharts() {
+    const timeOptions = yTitle => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      normalized: true,
+      scales: {
+        x: { title: { display: true, text: 'Simulation time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 8 } },
+        y: { title: { display: true, text: yTitle, color: '#94a3b8' }, beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+      },
+      plugins: { legend: { labels: { color: '#e2e8f0' } } }
+    });
+    const createLineChart = (id, datasets, yTitle) => new Chart(document.getElementById(id).getContext('2d'), {
+      type: 'line',
+      data: { labels: [], datasets },
+      options: timeOptions(yTitle)
+    });
+    const line = (label, color, extras = {}) => ({
+      label, data: [], borderColor: color, backgroundColor: `${color}22`,
+      borderWidth: 2, pointRadius: 0, tension: 0.2, ...extras
+    });
+    this.chartGoalError = createLineChart('chart-goal-error', [
+      line('Goal error [m]', '#22d3ee', { fill: true }),
+      line('Success threshold', '#22c55e', { borderDash: [6, 4], borderWidth: 1 })
+    ], 'Distance to Goal B [m]');
+    this.chartFormationError = createLineChart('chart-formation-error', [
+      line('Formation RMS [m]', '#a78bfa', { fill: true }),
+      line('Warning threshold', '#f97316', { borderDash: [6, 4], borderWidth: 1 })
+    ], 'Rigid-aligned RMS error [m]');
+    this.chartCableDelta = createLineChart('chart-cable-delta', [
+      line('Selected cable ΔL [m]', '#facc15'),
+      line('Zero extension', '#64748b', { borderDash: [4, 4], borderWidth: 1 })
+    ], 'Cable length change [m]');
+    this.chartCableForce = createLineChart('chart-cable-force', [
+      line('Selected cable [N]', '#fb7185'),
+      line('All-cable average [N]', '#38bdf8'),
+      line('Overload limit [N]', '#ef4444', { borderDash: [6, 4], borderWidth: 1 })
+    ], 'Tension force [N]');
+    this.chartContactCount = createLineChart('chart-contact-count', [
+      line('Active contacts', '#f97316', { stepped: true, fill: true })
+    ], 'Active node / rod contacts');
+    this.chartComPath = new Chart(document.getElementById('chart-com-path').getContext('2d'), {
+      type: 'scatter',
+      data: { datasets: [
+        { label: 'COM trajectory', data: [], showLine: true, borderColor: '#22d3ee', backgroundColor: '#22d3ee', borderWidth: 2, pointRadius: 0 },
+        { label: 'Start A', data: [], backgroundColor: '#38bdf8', pointRadius: 6 },
+        { label: 'Goal B', data: [], backgroundColor: '#22c55e', pointRadius: 7, pointStyle: 'rectRot' },
+        { label: 'Obstacles', data: [], backgroundColor: '#f59e0b88', borderColor: '#f59e0b', pointRadius: 5 }
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: {
+          x: { title: { display: true, text: 'World X [m]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          y: { title: { display: true, text: 'World Y [m]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+        },
+        plugins: { legend: { labels: { color: '#e2e8f0' } } }
+      }
+    });
+  }
+
+  initMonitoringControls() {
+    const cableSelect = document.getElementById('select-monitor-cable');
+    if (cableSelect) {
+      cableSelect.innerHTML = this.rover.outerStrings.map((_, index) =>
+        `<option value="${index}">C${String(index+1).padStart(2, '0')}</option>`).join('');
+      cableSelect.value = String(this.selectedCableIndex);
+    }
   }
 
   updateForceLawChart() {
@@ -220,6 +341,21 @@ class App {
     this.updateMetricsTable();
   }
 
+  handleAdaptiveLearningCycle(now) {
+    this.persistRouteLearning();
+    if (!this.autoLearningEnabled || this.cfg.experimentId !== 10 || !this.simB.metrics.runTerminal) {
+      this.learningRestartAt = null;
+      return;
+    }
+    if (this.learningRestartAt === null) this.learningRestartAt = now+2500;
+    if (now < this.learningRestartAt) return;
+    this.simA.reset();
+    this.simB.reset();
+    this.accumulatedTime = 0;
+    this.lastChartStep = 0;
+    this.learningRestartAt = null;
+  }
+
   animationLoop(timestamp) {
     requestAnimationFrame((t) => this.animationLoop(t));
 
@@ -236,12 +372,14 @@ class App {
 
       let safetyGuard = 0;
       while (this.accumulatedTime >= this.cfg.dt && safetyGuard < 400) {
-        if (this.simA.t < this.cfg.T_end) this.simA.step();
-        if (this.simB.t < this.cfg.T_end) this.simB.step();
+        if (this.simA.t < this.cfg.T_end && !this.simA.metrics.runTerminal) this.simA.step();
+        if (this.simB.t < this.cfg.T_end && !this.simB.metrics.runTerminal) this.simB.step();
         this.accumulatedTime -= this.cfg.dt;
         safetyGuard++;
       }
     }
+
+    this.handleAdaptiveLearningCycle(now);
 
     // Render 3D Scene Dual
     this.vis.updateDual({
@@ -255,7 +393,11 @@ class App {
 
   updateHUD() {
     const timeElem = document.getElementById('sim-time');
-    if (timeElem) timeElem.textContent = `${this.simB.t.toFixed(2)} s / ${this.cfg.T_end} s`;
+    if (timeElem) {
+      const attempt = this.routeLearner?.runCount+1 || 1;
+      const limit = this.terrain.course ? (this.cfg.missionDeadlineSeconds || this.cfg.T_end) : this.cfg.T_end;
+      timeElem.textContent = `${this.simB.t.toFixed(2)} s / ${limit} s${this.terrain.course ? ` · try ${attempt}` : ''}`;
+    }
 
     const diagA = this.simA.currentDiag;
     const diagB = this.simB.currentDiag;
@@ -308,12 +450,118 @@ class App {
     setText('hud-b-obstacles', `${summaryB.over} over / ${summaryB.around} around`);
     setText('hud-b-bypass', `${summaryB.bypassViolations || 0}`);
     setText('course-current-obstacle', diagB.activeObstacleId || 'none');
+    setText('course-checkpoints', `${summaryB.checkpointsReached || 0} / ${summaryB.total || 10}`);
     setText('course-phase', diagB.obstaclePhase || 'cruise');
     const courseY = diagB.centroid?.[1] || 0;
     setText('course-progress', courseY < 10
       ? `approach y=${courseY.toFixed(2)} / 10.00 m`
       : `${Math.max(0, Math.min(50, courseY-10)).toFixed(1)} / 50.0 m`);
+    this.updateMonitoringHUD(diagB.monitoring);
+    this.updateLearningHUD();
     this.updateABComparisonTable();
+  }
+
+  updateMonitoringHUD(monitoring) {
+    if (!monitoring) return;
+    const setText = (id, value) => { const element = document.getElementById(id); if (element) element.textContent = value; };
+    setText('monitor-start', formatVector(monitoring.start));
+    setText('monitor-goal', formatVector(monitoring.goal));
+    setText('monitor-com', formatVector(monitoring.com));
+    setText('monitor-goal-error', `${monitoring.goalError.toFixed(3)} m`);
+    setText('monitor-remaining', `${monitoring.remainingX.toFixed(2)} / ${monitoring.remainingY.toFixed(2)} m`);
+    setText('monitor-formation', `${monitoring.formationError.toFixed(4)} m`);
+    setText('monitor-stability', `${monitoring.stabilityLevel.toUpperCase()} · ${monitoring.status}`);
+    setText('monitor-rod-error', `${(monitoring.maximumRodError*1000).toFixed(3)} mm`);
+    setText('monitor-node-separation', `${monitoring.maximumNodeSeparation.toFixed(3)} m`);
+    setText('monitor-clearance', `${(monitoring.terrainClearance*1000).toFixed(3)} mm`);
+    setText('monitor-force-summary', `${monitoring.maximumCableForce.toFixed(1)} / ${monitoring.averageCableForce.toFixed(1)} N`);
+    setText('monitor-max-strain', `${monitoring.maximumCableStrain.toFixed(2)}%`);
+    setText('monitor-cable-counts', `${monitoring.slackCableCount} / ${monitoring.overloadedCableCount}`);
+    setText('monitor-grounded', monitoring.grounded ? 'GROUNDED' : 'AIRBORNE');
+    setText('monitor-contact-count', String(monitoring.activeContactCount));
+    setText('monitor-contact-ids', monitoring.contacts.map(contact => contact.id).join(', ') || '—');
+    setText('monitor-log-count', `${this.simB.monitor?.records.length || 0} raw samples`);
+
+    const statusElement = document.getElementById('monitor-status');
+    if (statusElement) {
+      const missionOutcome = this.simB.metrics.runOutcome;
+      statusElement.textContent = missionOutcome === 'win' ? 'MISSION WIN'
+        : missionOutcome === 'loss' ? 'MISSION LOSS' : monitoring.status.toUpperCase();
+      statusElement.classList.remove('status-stable', 'status-moderate', 'status-danger', 'status-goal');
+      statusElement.classList.add(missionOutcome === 'win' ? 'status-goal'
+        : missionOutcome === 'loss' ? 'status-danger'
+        : monitoring.stabilityLevel === 'green' ? 'status-stable'
+          : monitoring.stabilityLevel === 'yellow' ? 'status-moderate' : 'status-danger');
+    }
+    const goalResult = document.getElementById('monitor-goal-result');
+    if (goalResult) {
+      const metrics = this.simB.metrics;
+      if (metrics.runOutcome === 'win') {
+        goalResult.textContent = `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · learner keeps the faster route`;
+        goalResult.className = 'mt-2 rounded bg-emerald-950/60 p-2 text-emerald-300 font-bold';
+      } else if (metrics.runOutcome === 'loss') {
+        const remaining = Math.max(0, this.cfg.courseGoalY-(this.simB.currentDiag.centroid?.[1] || 0));
+        goalResult.textContent = `LOSS · 120 s exceeded · ${remaining.toFixed(2)} m remaining · gradient update saved for next try`;
+        goalResult.className = 'mt-2 rounded bg-rose-950/60 p-2 text-rose-300 font-bold';
+      } else {
+        goalResult.textContent = `Attempt ${this.routeLearner?.runCount+1 || 1} running · reach Goal B before 120 s`;
+        goalResult.className = 'mt-2 rounded bg-slate-900 p-2 text-slate-400';
+      }
+    }
+    const warningElement = document.getElementById('monitor-warnings');
+    if (warningElement) {
+      warningElement.textContent = monitoring.warnings.length
+        ? `WARNING · ${monitoring.warnings.join(' · ')}` : 'No structural warnings';
+      warningElement.className = monitoring.warnings.length
+        ? 'mt-2 rounded bg-rose-950/60 p-2 text-rose-300 font-bold'
+        : 'mt-2 rounded bg-emerald-950/40 p-2 text-emerald-300';
+    }
+
+    const cable = monitoring.cables[this.selectedCableIndex] || monitoring.cables[0];
+    if (cable) {
+      setText('cable-inspector-nodes', `N${cable.nodeA+1} ↔ N${cable.nodeB+1}`);
+      setText('cable-inspector-lengths', `${cable.restLength.toFixed(4)} / ${cable.currentLength.toFixed(4)} m`);
+      setText('cable-inspector-delta', `${cable.deltaLength >= 0 ? '+' : ''}${cable.deltaLength.toFixed(5)} m`);
+      setText('cable-inspector-strain', `${cable.strainPercent.toFixed(2)}%`);
+      setText('cable-inspector-force', `${cable.force.toFixed(2)} N`);
+      setText('cable-inspector-state', cable.state.toUpperCase());
+      const stateElement = document.getElementById('cable-inspector-state');
+      if (stateElement) stateElement.className = cable.state === 'overload' ? 'text-rose-400 font-bold'
+        : cable.state === 'slack' ? 'text-fuchsia-400' : cable.state === 'moderate' || cable.state === 'high'
+          ? 'text-amber-300' : 'text-emerald-300';
+    }
+    const contactList = document.getElementById('monitor-contact-list');
+    if (contactList) {
+      contactList.innerHTML = monitoring.contacts.length ? monitoring.contacts.map(contact => {
+        const friction = Math.hypot(...(contact.frictionForce || [0, 0, 0]));
+        return `<div class="flex justify-between gap-2"><span class="text-orange-300">${contact.id} · ${contact.objectId}</span><span>${contact.normalForce.toFixed(1)} N normal · ${friction.toFixed(1)} N friction</span></div>`;
+      }).join('') : 'No active contacts';
+    }
+  }
+
+  updateLearningHUD() {
+    const learning = this.simB.currentDiag.learning || this.routeLearner?.snapshot(this.simB.learningCommand);
+    if (!learning) return;
+    const setText = (id, value) => {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value;
+    };
+    const command = learning.currentCommand || this.simB.learningCommand || {};
+    const lastRun = learning.lastRun;
+    setText('learning-attempt', String(learning.runCount+1));
+    setText('learning-record', `${learning.wins} W / ${learning.losses} L`);
+    setText('learning-best', learning.bestTime === null ? 'No completed win yet' : `${learning.bestTime.toFixed(2)} s`);
+    setText('learning-segment', `${command.segmentLabel || 'S01'} · waypoint x=${(command.waypointX || 0).toFixed(2)} m`);
+    setText('learning-scales', `${(command.speedScale || 1).toFixed(3)} speed · ${(command.torqueScale || 1).toFixed(3)} torque · ${(command.tractionScale || 1).toFixed(3)} grip`);
+    setText('learning-last-result', lastRun
+      ? `${lastRun.outcome.toUpperCase()} · ${lastRun.time.toFixed(2)} s · loss ${lastRun.loss.toFixed(3)}`
+      : 'Waiting for first completed attempt');
+    const gradient = lastRun?.gradient;
+    setText('learning-gradient', gradient
+      ? `Δ speed ${gradient.speed >= 0 ? '+' : ''}${gradient.speed.toFixed(4)} · Δ torque ${gradient.torque >= 0 ? '+' : ''}${gradient.torque.toFixed(4)}`
+      : 'Gradient update after win/loss');
+    const autoButton = document.getElementById('btn-toggle-auto-learning');
+    if (autoButton) autoButton.textContent = `Auto training: ${this.autoLearningEnabled ? 'ON' : 'OFF'}`;
   }
 
   updateABComparisonTable() {
@@ -321,7 +569,8 @@ class App {
     if (!body) return;
     const renderModel = (label, metrics, color) => {
       const obstacles = metrics.obstacleSummary || { over: 0, around: 0, retries: 0, bypassViolations: 0 };
-      const completion = metrics.completionTime === null ? 'running' : `${metrics.completionTime.toFixed(1)} s`;
+      const completion = metrics.runOutcome === 'loss' ? 'LOSS · 120 s'
+        : metrics.completionTime === null ? 'running' : `WIN · ${metrics.completionTime.toFixed(1)} s`;
       return `<tr class="border-b border-slate-800">
         <td class="py-2.5 px-3 font-bold ${color}">${label}</td>
         <td class="py-2.5 px-3">${metrics.measuredDistance.toFixed(2)} m</td>
@@ -342,7 +591,7 @@ class App {
   }
 
   updateCharts() {
-    if (this.simB.stepCount - (this.lastChartStep || 0) >= 1000) {
+    if (this.simB.stepCount - (this.lastChartStep || 0) >= 250) {
       this.lastChartStep = this.simB.stepCount;
       const hist = this.simB.history;
       // Show a calm 20-second window instead of redrawing the full, noisy
@@ -364,8 +613,64 @@ class App {
       this.chartControl.data.datasets[2].data = movingAverage(hist.relaxationFraction, 50).slice(start).map(fraction => fraction*100);
       this.chartControl.update('none');
 
+      this.updateMonitoringCharts();
+
       this.updateMetricsTable();
     }
+  }
+
+  updateMonitoringCharts() {
+    const monitor = this.simB.monitor;
+    if (!monitor?.history?.t.length) return;
+    const history = monitor.history;
+    const windowSamples = Math.ceil(monitor.settings.chartWindowSeconds/monitor.settings.chartSamplePeriod);
+    const start = Math.max(0, history.t.length-windowSamples);
+    const labels = history.t.slice(start).map(time => time.toFixed(2));
+    const thresholdLine = value => new Array(labels.length).fill(value);
+    const cableDelta = history.cableDelta.slice(start).map(values => values[this.selectedCableIndex] || 0);
+    const cableForce = history.cableForce.slice(start).map(values => values[this.selectedCableIndex] || 0);
+    const cableAverage = history.cableForce.slice(start).map(values =>
+      values.reduce((sum, value) => sum+value, 0)/Math.max(1, values.length));
+
+    this.chartGoalError.data.labels = labels;
+    this.chartGoalError.data.datasets[0].data = movingAverage(history.goalError.slice(start), 3);
+    this.chartGoalError.data.datasets[1].data = thresholdLine(monitor.settings.goalThreshold);
+    this.chartGoalError.update('none');
+
+    this.chartFormationError.data.labels = labels;
+    this.chartFormationError.data.datasets[0].data = movingAverage(history.formationError.slice(start), 3);
+    this.chartFormationError.data.datasets[1].data = thresholdLine(monitor.settings.formationWarningThreshold);
+    this.chartFormationError.update('none');
+
+    this.chartCableDelta.data.labels = labels;
+    this.chartCableDelta.data.datasets[0].data = movingAverage(cableDelta, 3);
+    this.chartCableDelta.data.datasets[1].data = thresholdLine(0);
+    this.chartCableDelta.update('none');
+
+    this.chartCableForce.data.labels = labels;
+    this.chartCableForce.data.datasets[0].data = movingAverage(cableForce, 3);
+    this.chartCableForce.data.datasets[1].data = movingAverage(cableAverage, 3);
+    this.chartCableForce.data.datasets[2].data = thresholdLine(monitor.settings.cableOverloadForce);
+    this.chartCableForce.update('none');
+
+    this.chartContactCount.data.labels = labels;
+    this.chartContactCount.data.datasets[0].data = history.contactCount.slice(start);
+    this.chartContactCount.update('none');
+
+    const pathStart = Math.max(0, history.t.length-2500);
+    this.chartComPath.data.datasets[0].data = history.comX.slice(pathStart).map((x, index) => ({
+      x, y: history.comY[pathStart+index]
+    }));
+    this.chartComPath.data.datasets[1].data = [{ x: monitor.start[0], y: monitor.start[1] }];
+    this.chartComPath.data.datasets[2].data = [{ x: monitor.goal[0], y: monitor.goal[1] }];
+    this.chartComPath.data.datasets[3].data = (this.terrain.course?.obstacles || []).map(obstacle => ({ x: obstacle.x, y: obstacle.y }));
+    this.chartComPath.update('none');
+
+    const cableId = `C${String(this.selectedCableIndex+1).padStart(2, '0')}`;
+    const deltaLabel = document.getElementById('chart-cable-delta-label');
+    if (deltaLabel) deltaLabel.textContent = `${cableId} · ΔL [m]`;
+    const forceLabel = document.getElementById('chart-cable-force-label');
+    if (forceLabel) forceLabel.textContent = `${cableId} · tension [N]`;
   }
 
   updateMetricsTable() {
@@ -412,10 +717,12 @@ class App {
   loadExperiment(expId) {
     this.cfg.experimentId = expId;
     this.cfg.terrainLevel = Math.min(7, expId);
+    this.cfg.groundRMS = MARS_ROUGHNESS_BY_LEVEL[expId] || 0.04;
     this.cfg.abCourseEnabled = expId === 10;
     this.cfg.targetGoalY = expId === 10 ? 60 : 25;
     this.cfg.targetDestination = [0, this.cfg.targetGoalY];
-    this.cfg.T_end = expId === 10 ? 320 : 40;
+    if (expId === 10) this.cfg.applyLevel10PerformanceProfile();
+    else this.cfg.applyStandardPerformanceProfile();
 
     if (expId === 2) this.cfg.actuationMode = 'roll_backward';
     else this.cfg.actuationMode = 'roll_forward';
@@ -425,11 +732,27 @@ class App {
     document.getElementById('txt-active-experiment-title').textContent = EXPERIMENT_NAMES[expId - 1];
     const experimentSelect = document.getElementById('select-experiment');
     if (experimentSelect) experimentSelect.value = String(expId);
+    const speedSlider = document.getElementById('slider-target-speed');
+    if (speedSlider) speedSlider.value = String(this.cfg.targetSpeed);
+    const speedValue = document.getElementById('val-target-speed');
+    if (speedValue) speedValue.textContent = `${this.cfg.targetSpeed.toFixed(2)} m/s rolling target`;
+    const roughnessSlider = document.getElementById('slider-roughness');
+    if (roughnessSlider) roughnessSlider.value = String(this.cfg.groundRMS);
+    const roughnessValue = document.getElementById('val-roughness');
+    if (roughnessValue) roughnessValue.textContent = `${this.cfg.groundRMS.toFixed(3)} m`;
+    const controlRate = document.getElementById('control-rate-value');
+    if (controlRate) controlRate.textContent = `${Math.round(1/this.cfg.controllerDt)} Hz`;
 
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
     this.simA = new Simulation(this.cfg, this.rover, this.terrain, 'fixed');
-    this.simB = new Simulation(this.cfg, this.rover, this.terrain, 'adaptive');
+    this.simB = new Simulation(
+      this.cfg,
+      this.rover,
+      this.terrain,
+      'adaptive',
+      expId === 10 ? this.routeLearner : null
+    );
     this.accumulatedTime = 0;
     this.lastChartStep = 0;
 
@@ -516,8 +839,25 @@ class App {
       this.simA.reset();
       this.simB.reset();
       this.accumulatedTime = 0;
+      this.learningRestartAt = null;
       this.isPlaying = true;
       document.getElementById('btn-play-pause').textContent = 'Pause';
+    });
+
+    document.getElementById('btn-toggle-auto-learning')?.addEventListener('click', () => {
+      this.autoLearningEnabled = !this.autoLearningEnabled;
+      this.learningRestartAt = null;
+      this.updateLearningHUD();
+    });
+
+    document.getElementById('btn-clear-learning')?.addEventListener('click', () => {
+      this.routeLearner?.resetLearning();
+      this.persistRouteLearning();
+      this.simA.reset(false);
+      this.simB.reset(false);
+      this.accumulatedTime = 0;
+      this.learningRestartAt = null;
+      this.updateLearningHUD();
     });
 
     // Multi-rate realtime playback with an unchanged physics time step.
@@ -540,6 +880,40 @@ class App {
       forceOverlayOn = !forceOverlayOn;
       this.vis.toggleForceOverlay(forceOverlayOn);
       document.getElementById('btn-toggle-forces').textContent = `Force Overlay: ${forceOverlayOn ? 'ON' : 'OFF'}`;
+    });
+
+    document.getElementById('btn-toggle-debug')?.addEventListener('click', (event) => {
+      this.showDebugLabels = !this.showDebugLabels;
+      this.vis.toggleDebugLabels(this.showDebugLabels);
+      event.currentTarget.textContent = `IDs: ${this.showDebugLabels ? 'ON' : 'OFF'}`;
+      event.currentTarget.classList.toggle('text-cyan-300', this.showDebugLabels);
+    });
+
+    document.getElementById('select-monitor-cable')?.addEventListener('change', (event) => {
+      this.selectedCableIndex = Number(event.target.value) || 0;
+      this.vis.setSelectedCable(this.selectedCableIndex);
+      this.updateMonitoringHUD(this.simB.currentDiag.monitoring);
+      this.updateMonitoringCharts();
+    });
+
+    document.getElementById('input-goal-threshold')?.addEventListener('input', (event) => {
+      const threshold = Number(event.target.value);
+      this.cfg.monitoring.goalThreshold = threshold;
+      if (this.simB.monitor) this.simB.monitor.settings.goalThreshold = threshold;
+      const value = document.getElementById('val-goal-threshold');
+      if (value) value.textContent = `${threshold.toFixed(2)} m`;
+    });
+
+    document.querySelectorAll('[data-monitor-export]').forEach(button => {
+      button.addEventListener('click', () => {
+        const kind = button.dataset.monitorExport;
+        if (!this.simB.monitor) return;
+        downloadText(`${kind}.csv`, this.simB.monitor.exportCsv(kind));
+      });
+    });
+    document.getElementById('btn-export-monitor-json')?.addEventListener('click', () => {
+      if (!this.simB.monitor) return;
+      downloadText('complete_simulation_log.json', this.simB.monitor.exportJson(), 'application/json;charset=utf-8');
     });
 
     // Gravity Slider Control
@@ -590,15 +964,19 @@ class App {
     document.getElementById('slider-roughness').addEventListener('input', (e) => {
       const val = parseFloat(e.target.value);
       this.cfg.groundRMS = val;
-      this.terrain.generateSurface();
       document.getElementById('val-roughness').textContent = `${val.toFixed(2)} m`;
+    });
+    document.getElementById('slider-roughness').addEventListener('change', () => {
+      // Rebuild both physics and rendering from the same terrain seed so the
+      // roughness slider never leaves an old smooth mesh over new collisions.
+      this.loadExperiment(this.cfg.experimentId);
     });
 
     document.getElementById('slider-target-speed').addEventListener('input', (e) => {
-      const referenceSpeed = 0.20;
+      const referenceSpeed = 1.30;
       e.target.value = String(referenceSpeed);
       this.cfg.targetSpeed = referenceSpeed;
-      document.getElementById('val-target-speed').textContent = `${referenceSpeed.toFixed(2)} m/s reference (not forced)`;
+      document.getElementById('val-target-speed').textContent = `${referenceSpeed.toFixed(2)} m/s rolling target`;
     });
 
     document.getElementById('slider-incline')?.addEventListener('input', (e) => {

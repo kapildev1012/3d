@@ -5,7 +5,37 @@ import {
   senseCourseObstacle,
   obstacleActuation,
   ObstaclePassTracker
-} from './abExperiment.js?v=20260820-ab1';
+} from './abExperiment.js?v=20260821-modela1';
+import { MONITORING_DEFAULTS, RealtimeMonitor } from './monitoringSystem.js?v=20260821-monitor2';
+
+export const LEVEL10_PERFORMANCE = Object.freeze({
+  targetSpeed: 1.30,
+  timeLimit: 120.0,
+  groundRMS: 0.06,
+  controllerDt: 0.02,
+  cableLinearVelocity: 0.32,
+  coreCableLinearVelocity: 0.20,
+  actuatorTau: 0.06,
+  passiveSettlingDuration: 0.35,
+  maxPassiveSettlingDuration: 0.65,
+  stableHoldDuration: 0.05,
+  preloadDuration: 0.08,
+  shiftComDuration: 0.18,
+  tipDuration: 0.16,
+  rollTimeout: 0.28,
+  impactSettleDuration: 0.08,
+  antiSpinThreshold: 2.80,
+  rollingConstraintGain: 42.0,
+  tractionLimitRatio: 2.50,
+  rollTorqueGain: 200.0,
+  rollCoupleLimitRatio: 3.00,
+  mu_g: 6.00,
+  c_gt: 20.0,
+  courseSpeedGain: 70.0,
+  courseGradeCompensationGain: 1.35,
+  adaptiveContactGrip: 0.88,
+  stallWindow: 6.0
+});
 
 /**
  * SIMENGINE.JS - Physics & Locomotion Simulation Engine for 6-Bar Tensegrity Icosahedron Rover
@@ -13,7 +43,7 @@ import {
  * 1. Verified 6-bar / 24-cable expanded-icosahedron topology
  * 2. Fixed-step semi-implicit integration with rigid-strut SHAKE projection
  * 3. Tension-only spring/damper cables with rate-limited rest lengths
- * 4. 20 Hz support-face gait state machine with passive settling
+ * 4. Fixed-rate support-face gait state machine with passive settling
  * 5. Terrain-normal Hertz contact, damping, Coulomb friction and restitution
  * 6. Rolling/slip, energy, support-face and topology diagnostics
  */
@@ -87,7 +117,7 @@ export class SimConfig {
     this.strutMass = 0.3;         // Strut mass [kg]
 
     // Natural rolling gait timing. A cycle is deliberately human-visible;
-    // state changes occur only on the 20 Hz controller clock.
+    // state changes occur only on the configured controller clock.
     this.passiveSettlingDuration = 1.8;
     this.maxPassiveSettlingDuration = 3.0;
     this.stableHoldDuration = 0.30;
@@ -121,10 +151,22 @@ export class SimConfig {
     this.obstacleAvoidanceGain = 0.25;
     this.obstacleAvoidanceExponent = 0.40;
 
+    // The A/B worlds are two independent physical corridors. Simulation
+    // coordinates remain lane-local (centre x=0); the visualizer applies the
+    // signed world offset. A hard envelope is a final safety constraint,
+    // while the controller steers back toward its own centreline before the
+    // shell reaches that envelope.
+    this.modelLaneOffset = 1.50;
+    this.pathCorridorHalfWidth = 1.25;
+    this.pathCenteringGain = 1.65;
+    this.pathCenteringDamping = 0.90;
+    this.corridorSafetyMargin = 0.015;
+    this.adaptiveContactGrip = 0.72;
+
     // Terrain & Goal Configuration
     this.terrainLevel = 1;        // 1: Smooth, 2: Small Rocks, 3: Medium Rocks, 4: Large Rocks, 5: Crater, 6: Steep Slope, 7: Irregular Mars
     this.targetGoalY = 25.0;      // Endpoint goal target distance [m]
-    this.groundRMS = 0.04;        // Elevation RMS [m]
+    this.groundRMS = 0.06;        // Physical Mars roughness RMS [m]
     this.seed = 42;
 
     // Controlled A-vs-B course (Level 10).
@@ -133,12 +175,56 @@ export class SimConfig {
     this.courseGoalY = 60.0;
     this.courseMaxY = 70.0;
     this.courseMaxRetries = 2;
+    this.missionDeadlineSeconds = 120.0;
     this.stallWindow = 5.0;
+    this.courseSpeedGain = 0.0;
+    this.courseGradeCompensationGain = 0.0;
 
     // Current Active Experiment
     this.experimentId = 1;
 
+    const monitoringOverrides = overrides.monitoring || {};
     Object.assign(this, overrides);
+    this.monitoring = { ...MONITORING_DEFAULTS, ...monitoringOverrides };
+  }
+
+  applyLevel10PerformanceProfile() {
+    Object.assign(this, LEVEL10_PERFORMANCE, { T_end: LEVEL10_PERFORMANCE.timeLimit });
+    return this;
+  }
+
+  applyStandardPerformanceProfile() {
+    Object.assign(this, {
+      // Every terrain level starts with the same locomotion capability as
+      // Level 10. Terrain difficulty, not an artificial low speed, now
+      // distinguishes the experiments.
+      targetSpeed: LEVEL10_PERFORMANCE.targetSpeed,
+      T_end: 40.0,
+      controllerDt: 0.05,
+      cableLinearVelocity: 0.10,
+      coreCableLinearVelocity: 0.08,
+      actuatorTau: 0.20,
+      passiveSettlingDuration: 1.8,
+      maxPassiveSettlingDuration: 3.0,
+      stableHoldDuration: 0.30,
+      preloadDuration: 0.35,
+      shiftComDuration: 1.10,
+      tipDuration: 1.10,
+      rollTimeout: 1.00,
+      impactSettleDuration: 0.50,
+      antiSpinThreshold: 0.65,
+      rollingConstraintGain: 26.0,
+      tractionLimitRatio: 0.75,
+      rollTorqueGain: 30.0,
+      rollCoupleLimitRatio: 0.85,
+      mu_g: 1.15,
+      c_gt: 12.0,
+      adaptiveContactGrip: 0.78,
+      courseSpeedGain: 0.0,
+      courseGradeCompensationGain: 0.0,
+      stallWindow: 5.0
+    });
+    return this;
   }
 }
 
@@ -157,6 +243,30 @@ const smoothStep01 = value => {
   const x = clampValue(value, 0, 1);
   return x*x*(3-2*x);
 };
+// Ten-centimetre-or-better spacing on the longest one-metre struts prevents
+// the straight member between two clear endpoints from clipping a narrow
+// rock crest. Feature-centre candidates below add an exact sample for every
+// nearby discrete rock or obstacle.
+const MEMBER_COLLISION_SAMPLES = Object.freeze([
+  0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90
+]);
+const MEMBER_COLLISION_SKIN = 0.006;
+
+function evaluateRockOutcrop(rock, x, y) {
+  const rx = Math.max(0.04, rock.rx || rock.r || 0.2);
+  const ry = Math.max(0.04, rock.ry || rock.r || 0.2);
+  const dx = x-rock.x;
+  const dy = y-rock.y;
+  const normalizedRadiusSquared = dx*dx/(rx*rx)+dy*dy/(ry*ry);
+  if (normalizedRadiusSquared >= 4) return { h: 0, dhdx: 0, dhdy: 0 };
+  const factor = Math.exp(-normalizedRadiusSquared/0.8);
+  const h = rock.h*factor;
+  return {
+    h,
+    dhdx: h*(-2*dx/(0.8*rx*rx)),
+    dhdy: h*(-2*dy/(0.8*ry*ry))
+  };
+}
 
 export class TerrainModel {
   constructor(cfg) {
@@ -168,47 +278,154 @@ export class TerrainModel {
     const rng = createRNG(this.cfg.seed);
     const lvl = this.cfg.terrainLevel;
     this.rocks = [];
+    this.bPathRocks = [];
+    this.courseGritRocks = [];
     this.craters = [];
     this.slopes = [];
-    this.course = this.cfg.abCourseEnabled ? createABCourse() : null;
+    this.course = this.cfg.abCourseEnabled ? createABCourse(2*this.cfg.outerRadius) : null;
 
     if (this.course) {
-      this.rmsScale = 0.018;
+      // The benchmark previously forced an almost-flat 0.018 m surface and
+      // ignored the roughness control. Honour the configured RMS so the
+      // visible course and the contact solver use the same rough terrain.
+      this.rmsScale = clampValue(this.cfg.groundRMS, 0.0, 0.35);
     } else if (lvl === 1) {
-      this.rmsScale = 0.02;
+      this.rmsScale = Math.max(0.035, this.cfg.groundRMS);
     } else if (lvl === 2) {
-      this.rmsScale = 0.06;
+      this.rmsScale = Math.max(0.05, this.cfg.groundRMS);
       for (let i = 0; i < 8; i++) {
-        this.rocks.push({ x: (rng() - 0.5) * 4.0, y: 3.0 + i * 2.0, r: 0.22, h: 0.15 });
+        this.rocks.push({ x: (rng()-0.5)*4, y: 3+i*2, rx: 0.24, ry: 0.18, h: 0.15, kind: 'challenge' });
       }
     } else if (lvl === 3) {
-      this.rmsScale = 0.12;
+      this.rmsScale = Math.max(0.07, this.cfg.groundRMS);
       for (let i = 0; i < 10; i++) {
-        this.rocks.push({ x: (rng() - 0.5) * 5.0, y: 3.0 + i * 2.2, r: 0.35, h: 0.28 });
+        this.rocks.push({ x: (rng()-0.5)*5, y: 3+i*2.2, rx: 0.40, ry: 0.30, h: 0.28, kind: 'challenge' });
       }
     } else if (lvl === 4) {
-      this.rmsScale = 0.18;
-      this.rocks.push({ x: 0.0, y: 5.0, r: 0.55, h: 0.45 });
-      this.rocks.push({ x: 0.5, y: 11.0, r: 0.70, h: 0.55 });
+      this.rmsScale = Math.max(0.09, this.cfg.groundRMS);
+      this.rocks.push({ x: 0, y: 5, rx: 0.62, ry: 0.48, h: 0.45, kind: 'challenge' });
+      this.rocks.push({ x: 0.5, y: 11, rx: 0.78, ry: 0.58, h: 0.55, kind: 'challenge' });
     } else if (lvl === 5) {
-      this.rmsScale = 0.12;
+      this.rmsScale = Math.max(0.075, this.cfg.groundRMS);
       this.craters.push({ x: 0.0, y: 6.0, r: 2.0, depth: 0.60 });
     } else if (lvl === 6) {
-      this.rmsScale = 0.08;
+      this.rmsScale = Math.max(0.06, this.cfg.groundRMS);
       this.slopes.push({ yStart: 2.0, yEnd: 16.0, incline: 0.25 });
     } else if (lvl === 7 || lvl >= 8) {
-      this.rmsScale = 0.20;
+      this.rmsScale = Math.max(0.10, this.cfg.groundRMS);
       for (let i = 0; i < 12; i++) {
         this.rocks.push({
           x: (rng() - 0.5) * 5.0,
           y: 3.0 + i * 2.0 + rng() * 1.5,
-          r: 0.25 + rng() * 0.4,
-          h: 0.20 + rng() * 0.35
+          rx: 0.28+rng()*0.42,
+          ry: 0.22+rng()*0.30,
+          h: 0.20+rng()*0.35,
+          kind: 'challenge'
         });
       }
       this.craters.push({ x: 0.8, y: 12.0, r: 1.6, depth: 0.5 });
     } else {
       this.rmsScale = this.cfg.groundRMS;
+    }
+
+    // Photo-inspired Mars foundation shared by every level: granular sand,
+    // scattered embedded stones, and low broken ridgelines. Level 10 keeps
+    // these outcrops outside its strict centre corridor so its benchmark
+    // obstacles and learning objective remain unchanged.
+    const marsRng = createRNG((this.cfg.seed ^ 0x9e3779b9) >>> 0);
+    const terrainMaxY = this.course ? this.cfg.courseMaxY : 44;
+    const scatterCount = this.course ? 28 : 16+2*Math.min(10, Math.max(1, lvl));
+    for (let i = 0; i < scatterCount; i++) {
+      const side = marsRng() < 0.5 ? -1 : 1;
+      let x = this.course ? side*(1.95+1.75*marsRng()) : (marsRng()-0.5)*7.2;
+      const y = 1.5+marsRng()*(terrainMaxY-3);
+      let h = 0.045+0.13*marsRng();
+      if (!this.course && Math.abs(x) < 0.55) h *= 0.55;
+      this.rocks.push({
+        x,
+        y,
+        rx: 0.12+0.24*marsRng(),
+        ry: 0.09+0.18*marsRng(),
+        h,
+        yaw: (marsRng()-0.5)*Math.PI,
+        colorSeed: marsRng(),
+        kind: 'mars-scatter'
+      });
+    }
+
+    const ridgeCount = this.course ? 7 : 5;
+    for (let ridge = 0; ridge < ridgeCount; ridge++) {
+      const side = marsRng() < 0.5 ? -1 : 1;
+      const centerX = side*(this.course ? 2.25+0.85*marsRng() : 1.65+1.35*marsRng());
+      const centerY = 3+marsRng()*(terrainMaxY-6);
+      const yaw = (marsRng()-0.5)*0.7;
+      for (let stone = 0; stone < 4; stone++) {
+        const along = (stone-1.5)*(0.32+0.12*marsRng());
+        this.rocks.push({
+          x: centerX+along*Math.cos(yaw)+0.10*(marsRng()-0.5),
+          y: centerY+along*Math.sin(yaw)+0.12*(marsRng()-0.5),
+          rx: 0.28+0.24*marsRng(),
+          ry: 0.17+0.16*marsRng(),
+          h: 0.16+0.30*marsRng(),
+          yaw,
+          colorSeed: marsRng(),
+          kind: 'mars-ridge'
+        });
+      }
+    }
+
+    // Coarse sand and embedded grit are part of the physical obstacle
+    // surface, not a visual-only texture. Each irregular formation receives
+    // deterministic low-profile grains across its upper body so contacts gain
+    // small local normals and the rover cannot skate over a smooth analytic
+    // mound.
+    if (this.course) {
+      const gritRng = createRNG((this.cfg.seed ^ 0x68e31da4) >>> 0);
+      for (const obstacle of this.course.obstacles) {
+        for (let grain = 0; grain < 7; grain++) {
+          const angle = (gritRng()-0.5)*Math.PI*2;
+          const radius = 0.18+0.54*gritRng();
+          const localX = radius*obstacle.radiusX*Math.cos(angle);
+          const localY = radius*obstacle.radiusY*Math.sin(angle);
+          const cosYaw = Math.cos(obstacle.yaw || 0);
+          const sinYaw = Math.sin(obstacle.yaw || 0);
+          this.courseGritRocks.push({
+            obstacleId: obstacle.id,
+            x: obstacle.x+cosYaw*localX-sinYaw*localY,
+            y: obstacle.y+sinYaw*localX+cosYaw*localY,
+            rx: 0.055+0.055*gritRng(),
+            ry: 0.045+0.045*gritRng(),
+            h: 0.012+0.020*gritRng(),
+            yaw: angle,
+            colorSeed: gritRng(),
+            kind: 'course-grit'
+          });
+        }
+      }
+    }
+
+    // Model B receives an additional deterministic field of small embedded
+    // stones along its physical route. These are kept separate from the
+    // shared Mars scenery so Model A retains the original benchmark surface,
+    // while every B contact/clearance query uses the denser rock path.
+    if (this.course) {
+      const bPathRng = createRNG((this.cfg.seed ^ 0xb5297a4d) >>> 0);
+      const rockCount = 42;
+      const firstY = this.course.startY+0.60;
+      const lastY = this.course.goalY-0.80;
+      for (let i = 0; i < rockCount; i++) {
+        const progress = i/Math.max(1, rockCount-1);
+        this.bPathRocks.push({
+          x: (bPathRng()-0.5)*1.55,
+          y: firstY+progress*(lastY-firstY)+0.22*(bPathRng()-0.5),
+          rx: 0.075+0.075*bPathRng(),
+          ry: 0.065+0.070*bPathRng(),
+          h: 0.035+0.055*bPathRng(),
+          yaw: (bPathRng()-0.5)*Math.PI,
+          colorSeed: bPathRng(),
+          kind: 'b-path'
+        });
+      }
     }
 
     const M = 6, N = 8;
@@ -235,8 +452,8 @@ export class TerrainModel {
     this.modes = modes;
   }
 
-  eval(x, y) {
-    const surface = this.evalBase(x, y);
+  eval(x, y, modelType = 'fixed') {
+    const surface = this.evalBase(x, y, modelType);
     let { h, dhdx, dhdy } = surface;
     for (const obstacle of this.course?.obstacles || []) {
       const contribution = evaluateCourseObstacle(obstacle, x, y);
@@ -244,10 +461,52 @@ export class TerrainModel {
       dhdx += contribution.dhdx;
       dhdy += contribution.dhdy;
     }
+    for (const grain of this.courseGritRocks) {
+      const contribution = evaluateRockOutcrop(grain, x, y);
+      h += contribution.h;
+      dhdx += contribution.dhdx;
+      dhdy += contribution.dhdy;
+    }
     return { h, dhdx, dhdy };
   }
 
-  evalBase(x, y) {
+  objectAt(x, y, modelType = 'fixed') {
+    let objectId = 'ground';
+    let maximumContribution = 1e-5;
+    for (const obstacle of this.course?.obstacles || []) {
+      const contribution = evaluateCourseObstacle(obstacle, x, y).h;
+      if (contribution > maximumContribution) {
+        maximumContribution = contribution;
+        objectId = obstacle.id;
+      }
+    }
+    this.courseGritRocks.forEach((grain, index) => {
+      const contribution = evaluateRockOutcrop(grain, x, y).h;
+      if (contribution > maximumContribution) {
+        maximumContribution = contribution;
+        objectId = `grit-${grain.obstacleId}-${index+1}`;
+      }
+    });
+    this.rocks.forEach((rock, index) => {
+      const contribution = evaluateRockOutcrop(rock, x, y).h;
+      if (contribution > maximumContribution) {
+        maximumContribution = contribution;
+        objectId = `rock-${index+1}`;
+      }
+    });
+    if (modelType === 'adaptive') {
+      this.bPathRocks.forEach((rock, index) => {
+        const contribution = evaluateRockOutcrop(rock, x, y).h;
+        if (contribution > maximumContribution) {
+          maximumContribution = contribution;
+          objectId = `b-rock-${index+1}`;
+        }
+      });
+    }
+    return objectId;
+  }
+
+  evalBase(x, y, modelType = 'fixed') {
     let h = 0;
     let dhdx = 0;
     let dhdy = 0;
@@ -265,16 +524,18 @@ export class TerrainModel {
     }
 
     for (let rock of this.rocks) {
-      const dx = x - rock.x;
-      const dy = y - rock.y;
-      const d2 = dx * dx + dy * dy;
-      const r2 = rock.r * rock.r;
-      if (d2 < 4.0 * r2) {
-        const factor = Math.exp(-d2 / (0.8 * r2));
-        const rockH = rock.h * factor;
-        h += rockH;
-        dhdx += rockH * (-2.0 * dx / (0.8 * r2));
-        dhdy += rockH * (-2.0 * dy / (0.8 * r2));
+      const contribution = evaluateRockOutcrop(rock, x, y);
+      h += contribution.h;
+      dhdx += contribution.dhdx;
+      dhdy += contribution.dhdy;
+    }
+
+    if (modelType === 'adaptive') {
+      for (const rock of this.bPathRocks) {
+        const contribution = evaluateRockOutcrop(rock, x, y);
+        h += contribution.h;
+        dhdx += contribution.dhdx;
+        dhdy += contribution.dhdy;
       }
     }
 
@@ -313,6 +574,52 @@ export class TerrainModel {
     }
 
     return { h, dhdx, dhdy };
+  }
+
+  solidTerrainObjects(modelType = 'fixed') {
+    return [
+      ...(this.course?.obstacles || []),
+      ...this.courseGritRocks,
+      ...this.rocks,
+      ...(modelType === 'adaptive' ? this.bPathRocks : [])
+    ];
+  }
+
+  memberCollisionParameters(positionA, positionB, modelType = 'fixed') {
+    const parameters = [...MEMBER_COLLISION_SAMPLES];
+    const segmentX = positionB[0]-positionA[0];
+    const segmentY = positionB[1]-positionA[1];
+    const planarLengthSquared = segmentX*segmentX+segmentY*segmentY;
+    if (planarLengthSquared < 1e-10) return parameters;
+
+    const features = this.solidTerrainObjects(modelType);
+    for (const feature of features) {
+      const projected = ((feature.x-positionA[0])*segmentX
+        +(feature.y-positionA[1])*segmentY)/planarLengthSquared;
+      if (projected <= 0 || projected >= 1) continue;
+      const nearestX = positionA[0]+projected*segmentX;
+      const nearestY = positionA[1]+projected*segmentY;
+      const radiusX = feature.radiusX || feature.rx || feature.r || 0.2;
+      const radiusY = feature.radiusY || feature.ry || feature.r || 0.2;
+      const reach = (feature.radiusX ? 1.7 : 2.1)*Math.max(radiusX, radiusY)+0.04;
+      const dx = nearestX-feature.x;
+      const dy = nearestY-feature.y;
+      if (dx*dx+dy*dy <= reach*reach) parameters.push(projected);
+    }
+    return [...new Set(parameters.map(value => Number(value.toFixed(7))))]
+      .sort((first, second) => first-second);
+  }
+
+  forModel(modelType = 'fixed') {
+    const source = this;
+    const view = Object.create(source);
+    view.eval = (x, y) => source.eval(x, y, modelType);
+    view.evalBase = (x, y) => source.evalBase(x, y, modelType);
+    view.objectAt = (x, y) => source.objectAt(x, y, modelType);
+    view.solidTerrainObjects = () => source.solidTerrainObjects(modelType);
+    view.memberCollisionParameters = (positionA, positionB) =>
+      source.memberCollisionParameters(positionA, positionB, modelType);
+    return view;
   }
 }
 
@@ -459,17 +766,26 @@ export class SphericalRoverModel {
 }
 
 export class Simulation {
-  constructor(cfg, rover, terrain, modelType = 'fixed') {
+  constructor(cfg, rover, terrain, modelType = 'fixed', routeLearner = null) {
     this.cfg = cfg;
     this.rover = rover;
-    this.terrain = terrain;
     this.modelType = modelType; // 'fixed' or 'adaptive'
-    this.reset();
+    this.terrainSource = terrain;
+    this.terrain = typeof terrain.forModel === 'function'
+      ? terrain.forModel(modelType)
+      : terrain;
+    this.routeLearner = modelType === 'adaptive' ? routeLearner : null;
+    this.reset(false);
   }
 
-  reset() {
+  reset(learnFromCurrent = true) {
+    if (learnFromCurrent && this.routeLearner && this.t > 0 && !this.runFinalized) {
+      this.finalizeRun('reset');
+    }
     this.t = 0.0;
     this.stepCount = 0;
+    this.runFinalized = false;
+    this.routeLearner?.beginRun();
 
     const n = this.rover.nOuter;
     const lowestLocalNode = Math.min(...this.rover.q0_outer.map(position => position[2]));
@@ -522,6 +838,10 @@ export class Simulation {
     this.measuredRunCompletedAt = null;
     this.prevMetricPosition = [0, initialY];
     this.speedSamples = [];
+    this.learningCommand = this.routeLearner?.commandAt({ x: 0, y: initialY, grade: 0 }) || null;
+    this.monitor = this.modelType === 'adaptive' && this.cfg.monitoring?.enabled
+      ? new RealtimeMonitor(this.cfg, this.rover, this.terrain, this.q, [0, initialY, initialZ])
+      : null;
 
     // String length offsets
     this.currentActuationOffsets = new Array(this.rover.outerStrings.length).fill(0.0);
@@ -565,6 +885,15 @@ export class Simulation {
       maxConstraintError: 0.0,
       peakKineticEnergy: 0.0,
       maxSlipSpeed: 0.0,
+      minimumTerrainClearances: {
+        nodes: Infinity,
+        bars: Infinity,
+        outerCables: Infinity,
+        core: Infinity,
+        coreCables: Infinity
+      },
+      maximumPathOffset: 0.0,
+      corridorBoundaryHits: 0,
       completedRolls: 0,
       stabilityScore: 100.0,
       payloadAccelMax: 1.0,
@@ -575,6 +904,12 @@ export class Simulation {
       lateralTravel: 0.0,
       completionTime: null,
       courseComplete: false,
+      runTerminal: false,
+      runOutcome: 'running',
+      runDeadline: this.cfg.missionDeadlineSeconds || this.cfg.T_end,
+      goalReached: false,
+      goalResult: null,
+      learning: this.routeLearner?.snapshot(this.learningCommand) || null,
       obstacleSummary: this.obstacleTracker?.summary() || null
     };
 
@@ -630,7 +965,17 @@ export class Simulation {
       kineticEnergy: 0,
       completedRolls: 0,
       terrainClearance: this.cfg.terrainClearanceEpsilon,
+      terrainClearanceComponents: null,
       terrainLiftCorrection: 0,
+      pathCorridor: {
+        lane: this.modelType === 'fixed' ? 'A' : 'B',
+        worldOffset: this.modelType === 'fixed'
+          ? -this.cfg.modelLaneOffset : this.cfg.modelLaneOffset,
+        halfWidth: this.cfg.pathCorridorHalfWidth,
+        centreX: 0,
+        correction: 0,
+        boundaryHit: false
+      },
       corePosition: this.corePosition.slice(),
       coreVelocity: this.coreVelocity.slice(),
       coreCableForces: this.coreCableForces.slice(),
@@ -638,13 +983,72 @@ export class Simulation {
       activeObstacleId: null,
       obstacleSummary: this.metrics.obstacleSummary,
       actuationTraction: 0,
-      actuationRollTorque: 0
+      actuationRollTorque: 0,
+      monitoring: this.monitor?.latest || null,
+      learning: this.metrics.learning,
+      contacts: [],
+      cableTelemetry: []
     };
+  }
+
+  finalizeRun(reason = 'timeout') {
+    if (this.runFinalized || !this.metrics) return this.metrics?.learning?.lastRun || null;
+    const reached = Boolean(this.metrics.courseComplete);
+    const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
+    const outcome = reached && this.t <= deadline+1e-9 ? 'win' : 'loss';
+    this.metrics.runOutcome = outcome;
+    this.metrics.runTerminal = reason !== 'reset' && reason !== 'configuration_change';
+    this.metrics.completionTime = reached ? this.t : null;
+    const finalY = this.currentDiag?.centroid?.[1] ?? this.prevMetricPosition?.[1] ?? 0;
+    const result = this.routeLearner?.finishRun({
+      reached,
+      time: this.t,
+      finalY,
+      maxSlip: this.metrics.maxSlipSpeed,
+      rollingError: this.currentDiag?.rollingError || 0,
+      lateralTravel: this.metrics.lateralTravel,
+      reason
+    }) || {
+      attempt: 1,
+      outcome,
+      reason,
+      time: this.t,
+      finalY,
+      remaining: Math.max(0, (this.cfg.courseGoalY || this.cfg.targetGoalY)-finalY)
+    };
+    this.metrics.learning = this.routeLearner?.snapshot(this.learningCommand) || {
+      deadlineSeconds: deadline,
+      runCount: 1,
+      nextAttempt: 2,
+      wins: outcome === 'win' ? 1 : 0,
+      losses: outcome === 'loss' ? 1 : 0,
+      bestTime: outcome === 'win' ? this.t : null,
+      lastRun: result,
+      currentCommand: this.learningCommand
+    };
+    this.runFinalized = true;
+    return result;
   }
 
   senseObstacleAhead(cx, cy, cvy) {
     if (!this.terrain) return { detected: false, height: 0, distance: 0, steerSign: 0 };
     if (this.terrain.course) {
+      if (this.modelType === 'adaptive' && this.obstacleTracker) {
+        const checkpoint = this.obstacleTracker.currentCheckpoint();
+        if (!checkpoint) return { detected: false, height: 0, distance: Infinity, steerSign: 0, checkpoint: true };
+        const longitudinalError = checkpoint.y-cy;
+        const lateralError = cx-checkpoint.x;
+        return {
+          detected: true,
+          obstacle: checkpoint,
+          distance: Math.max(0, Math.abs(longitudinalError)-checkpoint.radiusY),
+          height: checkpoint.height,
+          lateralError,
+          steerSign: lateralError >= 0 ? 1 : -1,
+          checkpoint: true,
+          longitudinalError
+        };
+      }
       return senseCourseObstacle(this.terrain.course, cx, cy, cvy || 1);
     }
     // Look ahead 0.5m to 1.5m in the direction of travel
@@ -669,7 +1073,8 @@ export class Simulation {
     // Prefer steering away from the nearest explicit rock center.
     for (const rock of this.terrain.rocks || []) {
       const ahead = (rock.y-cy) * dir;
-      if (ahead > 0 && ahead < 1.8 && Math.abs(rock.x-cx) < rock.r+0.8) {
+      const rockRadius = Math.max(rock.rx || rock.r || 0.2, rock.ry || rock.r || 0.2);
+      if (ahead > 0 && ahead < 1.8 && Math.abs(rock.x-cx) < rockRadius+0.8) {
         obstacleDist = obstacleDist || ahead;
         maxDh = Math.max(maxDh, rock.h);
         steerSign = rock.x >= cx ? -1 : 1;
@@ -682,34 +1087,54 @@ export class Simulation {
     return { detected: false, height: 0, distance: 0, steerSign: 0 };
   }
 
-  desiredDirectionForMode(centroid, obstacle) {
+  desiredDirectionForMode(centroid, obstacle, velocity = [0, 0, 0], learning = null) {
     const mode = this.cfg.actuationMode;
     if (mode === 'none') return [0, 0, 0];
-    if (mode === 'roll_backward') return [0, -1, 0];
-    if (mode === 'steer_left') return [-0.55, 0.835, 0];
-    if (mode === 'steer_right') return [0.55, 0.835, 0];
+    const corridorDirection = (baseX, baseY, pathTargetX = 0, gainScale = 1) => {
+      const centreLimit = Math.max(0.12,
+        this.cfg.pathCorridorHalfWidth-this.rover.R_outer-this.cfg.corridorSafetyMargin);
+      const lateralError = clampValue(pathTargetX, -0.72*centreLimit, 0.72*centreLimit)-centroid[0];
+      let correctedX = baseX
+        +this.cfg.pathCenteringGain*gainScale*lateralError
+        -this.cfg.pathCenteringDamping*velocity[0];
+      const boundaryRatio = Math.abs(centroid[0])/centreLimit;
+      if (boundaryRatio > 0.68) {
+        correctedX -= Math.sign(centroid[0])*2.2*
+          smoothStep01((boundaryRatio-0.68)/0.32);
+      }
+      correctedX = clampValue(correctedX, -1.35, 1.35);
+      const length = Math.hypot(correctedX, baseY);
+      return length > 1e-9 ? [correctedX/length, baseY/length, 0] : [0, 1, 0];
+    };
+    if (mode === 'roll_backward') return corridorDirection(0, -1);
+    if (mode === 'steer_left') return corridorDirection(-0.55, 0.835);
+    if (mode === 'steer_right') return corridorDirection(0.55, 0.835);
     const target = this.cfg.targetDestination || [0, this.cfg.targetGoalY || 25];
-    let dx = target[0]-centroid[0];
-    let dy = target[1]-centroid[1];
+    let dx = 0;
+    let dy = Math.sign(target[1]-centroid[1]) || 1;
+    let pathTargetX = target[0];
+    let pathGainScale = 1;
     if (this.modelType === 'adaptive' && this.terrain.course && obstacle?.detected) {
       // Model B must align with, and pass through, the obstacle footprint.
-      // This is a steering target only; it does not translate the rover.
-      const lateralError = obstacle.obstacle.x-centroid[0];
-      const corridor = this.terrain.course.obstacleCorridorHalfWidth;
-      dx = (Math.abs(lateralError) > corridor ? 4.2 : 2.8)*lateralError;
-      dy = Math.max(Math.abs(lateralError) > corridor ? 0.12 : 0.35,
-        obstacle.obstacle.y+obstacle.obstacle.radiusY-centroid[1]);
-      // If the shell crosses the crest outside the centre band, back off and
-      // realign physically before the classifier could accept a side pass.
-      if (centroid[1] > obstacle.obstacle.y+0.15*obstacle.obstacle.radiusY &&
-        Math.abs(lateralError) > corridor) dy = -0.45;
+      // Use a bounded, forward-only course correction. Large diagonal and
+      // reverse commands made the spherical shell weave and waste seconds at
+      // each crest even after it had already entered the centre band.
+      const routeTargetX = obstacle.checkpoint
+        ? obstacle.obstacle.x
+        : Number.isFinite(learning?.waypointX) ? learning.waypointX : obstacle.obstacle.x;
+      pathTargetX = routeTargetX;
+      pathGainScale = learning?.alignmentScale || 1;
+      // Keep positive roll authority through the summit. Reverse only after a
+      // clear missed-crest overshoot; reducing drive at the centre can strand
+      // a tensegrity shell on the steep face before its payload reaches top.
+      dy = obstacle.checkpoint && obstacle.longitudinalError < -0.55 ? -0.42 : 1.0;
       if (this.t < this.obstacleRecoveryUntil) dy = -0.30;
     } else if (this.modelType === 'fixed' && obstacle?.detected) {
-      // Model A is an unconstrained baseline and may naturally go around.
+      // Model A may choose a local side of the obstacle, but the correction
+      // below always keeps that manoeuvre inside the assigned A corridor.
       dx += (obstacle.steerSign || 1)*Math.max(0, 1.4-obstacle.distance)*0.65;
     }
-    const length = Math.hypot(dx, dy);
-    return length > 1e-9 ? [dx/length, dy/length, 0] : [0, 1, 0];
+    return corridorDirection(dx, dy, pathTargetX, pathGainScale);
   }
 
   detectSupportGeometry(centroid, desiredDirection) {
@@ -844,7 +1269,23 @@ export class Simulation {
       this.activeObstacleId = obstacle?.obstacle?.id || null;
       this.obstaclePhase = obstacle?.detected ? 'BASELINE_FREE_PATH' : 'BASELINE_CRUISE';
     }
-    const desiredDirection = this.desiredDirectionForMode(centroid, obstacle);
+    const surfaceAhead = this.terrain.eval(centroid[0], centroid[1]);
+    this.learningCommand = this.routeLearner?.commandAt({
+      x: centroid[0],
+      y: centroid[1],
+      grade: surfaceAhead.dhdy,
+      obstacle: obstacle?.obstacle || null
+    }) || null;
+    this.routeLearner?.observe({
+      time: this.t,
+      x: centroid[0],
+      y: centroid[1],
+      speed: Math.hypot(velocity[0], velocity[1]),
+      slip: this.currentDiag?.slipSpeed || 0,
+      rollingError: this.currentDiag?.rollingError || 0,
+      grade: surfaceAhead.dhdy
+    });
+    const desiredDirection = this.desiredDirectionForMode(centroid, obstacle, velocity, this.learningCommand);
     const support = this.detectSupportGeometry(centroid, desiredDirection);
     this.supportFace = support.supportFace;
     this.supportSignature = support.signature;
@@ -919,7 +1360,10 @@ export class Simulation {
     }
 
     const cableTargets = new Array(this.rover.outerStrings.length).fill(0);
-    const commandedDelta = obstacleProfile?.delta || cfg.actuationDeltaL;
+    const commandedDelta = Math.min(
+      1.18*cfg.actuationDeltaL,
+      (obstacleProfile?.delta || cfg.actuationDeltaL)*(this.learningCommand?.actuationScale || 1)
+    );
     const relaxationRatio = obstacleProfile?.relaxationRatio ?? 0.35;
     for (const cable of this.contractingCableIndices) cableTargets[cable] = commandedDelta*actuationFactor;
     for (const cable of this.relaxingCableIndices) cableTargets[cable] = -relaxationRatio*commandedDelta*actuationFactor;
@@ -938,7 +1382,9 @@ export class Simulation {
           (position[1]-centroid[1])*desiredDirection[1]
       })).sort((a, b) => b.projection-a.projection);
       const speedAlongTarget = velocity[0]*desiredDirection[0]+velocity[1]*desiredDirection[1];
-      const speedErrorBoost = clampValue((cfg.targetSpeed-Math.max(0, speedAlongTarget))/cfg.targetSpeed, 0, 1);
+      const learnedTargetSpeed = cfg.targetSpeed*(this.learningCommand?.speedScale || 1);
+      const speedErrorBoost = clampValue(
+        (learnedTargetSpeed-Math.max(0, speedAlongTarget))/Math.max(0.1, learnedTargetSpeed), 0, 1);
       const payloadStroke = cfg.coreActuationDeltaL*(0.80+0.20*speedErrorBoost)*actuationFactor;
       for (const item of projectedNodes.slice(0, 4)) coreTargets[item.node] = payloadStroke;
       for (const item of projectedNodes.slice(-2)) coreTargets[item.node] = -0.35*payloadStroke;
@@ -953,10 +1399,13 @@ export class Simulation {
       rodTargets: new Array(this.rover.bars.length).fill(0),
       diagnostics: {
         mode: 'natural_support_face',
-        modeLabel: this.modelType === 'fixed' ? 'Model A · baseline/avoidance allowed' : 'Model B · strict over-obstacle',
+        modeLabel: this.modelType === 'fixed'
+          ? 'Model A · locked A corridor'
+          : 'Model B · locked B corridor · strict over-obstacle',
         desiredDirection,
         predictedPath: [[centroid[0], centroid[1], centroid[2]], [centroid[0]+desiredDirection[0], centroid[1]+desiredDirection[1], centroid[2]]],
         controlCost: targetError*0.02+targetEffort*50,
+        learning: this.routeLearner?.snapshot(this.learningCommand) || null,
         activeCableCount: actuationFactor > 0 ? this.contractingCableIndices.length+this.relaxingCableIndices.length : 0,
         activeRodCount: 0,
         disturbanceEstimate: obstacle?.detected ? obstacle.height : 0,
@@ -1013,68 +1462,211 @@ export class Simulation {
     return Math.sqrt(wx*wx + wy*wy + wz*wz);
   }
 
-  minimumTerrainClearance(includeMembers = true) {
-    if (!this.cfg.enableGround) return Infinity;
-    let minimum = Infinity;
-    const q = this.q;
-    const terrain = this.terrain;
-
-    // Nodes are the primary contact geometry.
-    for (let i = 0; i < q.length; i++) {
-      const ground = terrain.eval(q[i][0], q[i][1]).h;
-      minimum = Math.min(minimum, q[i][2]-ground-this.cfg.nodeRadius);
+  terrainClearanceReport(includeMembers = true) {
+    if (!this.cfg.enableGround) {
+      return { nodes: Infinity, bars: Infinity, outerCables: Infinity, core: Infinity, coreCables: Infinity, minimum: Infinity };
     }
-
-    // Sample collision clearance along every member so a cable or strut cannot
-    // visually pass through a ridge while both endpoints remain above it.
-    const sampleMembers = (members, radius) => {
-      for (const [i, j] of members) {
-        for (const sample of [1, 2, 3]) {
-          const t = sample/4;
-          const x = q[i][0]*(1-t)+q[j][0]*t;
-          const y = q[i][1]*(1-t)+q[j][1]*t;
-          const z = q[i][2]*(1-t)+q[j][2]*t;
-          const ground = terrain.eval(x, y).h;
-          minimum = Math.min(minimum, z-ground-radius);
-        }
+    const report = { nodes: Infinity, bars: Infinity, outerCables: Infinity, core: Infinity, coreCables: Infinity };
+    const segmentClearance = (positionA, positionB, radius) => {
+      let minimum = Infinity;
+      const parameters = this.terrain.memberCollisionParameters(positionA, positionB);
+      for (const t of parameters) {
+        const x = positionA[0]*(1-t)+positionB[0]*t;
+        const y = positionA[1]*(1-t)+positionB[1]*t;
+        const z = positionA[2]*(1-t)+positionB[2]*t;
+        minimum = Math.min(minimum, z-this.terrain.eval(x, y).h-radius);
       }
+      return minimum;
     };
-    if (includeMembers) {
-      sampleMembers(this.rover.bars, 0.035);
-      sampleMembers(this.rover.outerStrings, 0.012);
+
+    for (const position of this.q) {
+      report.nodes = Math.min(report.nodes,
+        position[2]-this.terrain.eval(position[0], position[1]).h-this.cfg.nodeRadius);
     }
-    return minimum;
+    for (const [i, j] of this.rover.bars) {
+      report.bars = Math.min(report.bars, segmentClearance(this.q[i], this.q[j], 0.035));
+    }
+    if (includeMembers) {
+      for (const [i, j] of this.rover.outerStrings) {
+        report.outerCables = Math.min(report.outerCables, segmentClearance(this.q[i], this.q[j], 0.012));
+      }
+      report.core = this.corePosition[2]
+        -this.terrain.eval(this.corePosition[0], this.corePosition[1]).h-this.rover.R_core;
+      for (let node = 0; node < this.q.length; node++) {
+        report.coreCables = Math.min(report.coreCables,
+          segmentClearance(this.q[node], this.corePosition, 0.006));
+      }
+    }
+    report.minimum = Math.min(...Object.values(report));
+    return report;
+  }
+
+  minimumTerrainClearance(includeMembers = true) {
+    return this.terrainClearanceReport(includeMembers).minimum;
+  }
+
+  enforcePathCorridor() {
+    const halfWidth = Math.max(
+      this.rover.R_outer+0.10,
+      this.cfg.pathCorridorHalfWidth || 1.25
+    );
+    const skin = this.cfg.corridorSafetyMargin || 0.015;
+    let minimumX = this.corePosition[0]-this.rover.R_core;
+    let maximumX = this.corePosition[0]+this.rover.R_core;
+    for (const position of this.q) {
+      minimumX = Math.min(minimumX, position[0]-this.cfg.nodeRadius);
+      maximumX = Math.max(maximumX, position[0]+this.cfg.nodeRadius);
+    }
+
+    let correction = 0;
+    if (maximumX > halfWidth-skin) correction = halfWidth-skin-maximumX;
+    if (minimumX+correction < -halfWidth+skin) {
+      correction += -halfWidth+skin-(minimumX+correction);
+    }
+    if (Math.abs(correction) > 1e-12) {
+      for (const position of this.q) position[0] += correction;
+      this.corePosition[0] += correction;
+      const centroidVelocityX = (
+        this.v.reduce((sum, velocity) => sum+velocity[0], 0)+this.coreVelocity[0]
+      )/(this.v.length+1);
+      const movingOutward = correction < 0 ? centroidVelocityX > 0 : centroidVelocityX < 0;
+      if (movingOutward) {
+        for (const velocity of this.v) velocity[0] -= centroidVelocityX;
+        this.coreVelocity[0] -= centroidVelocityX;
+      }
+    }
+
+    const centreX = this.q.reduce((sum, position) => sum+position[0], 0)/this.q.length;
+    return {
+      lane: this.modelType === 'fixed' ? 'A' : 'B',
+      worldOffset: this.modelType === 'fixed'
+        ? -this.cfg.modelLaneOffset : this.cfg.modelLaneOffset,
+      halfWidth,
+      centreX,
+      correction,
+      boundaryHit: Math.abs(correction) > 1e-12
+    };
   }
 
   enforceTerrainNonPenetration() {
-    // Resolve only real contact geometry: spherical end nodes and rigid bars.
-    // No whole-body/envelope lift is applied, so gravity and contact impulses
-    // remain responsible for the rover's vertical motion.
+    // Apply hard contact to every rendered physical component: nodes, bars,
+    // outer strings, payload core, and all twelve core suspension cables.
+    // Corrections are local to the colliding member; there is no whole-body
+    // teleport or artificial COM translation.
     let maximumLocalCorrection = 0;
-    for (let iteration = 0; iteration < 4; iteration++) {
-      for (const position of this.q) {
-        const minimumZ = this.terrain.eval(position[0], position[1]).h+this.cfg.nodeRadius+this.cfg.terrainClearanceEpsilon;
-        if (position[2] < minimumZ) {
-          maximumLocalCorrection = Math.max(maximumLocalCorrection, minimumZ-position[2]);
-          position[2] = minimumZ;
+    const memberContactMap = new Map();
+    const segments = [];
+    const clearanceReport = {
+      nodes: Infinity,
+      bars: Infinity,
+      outerCables: Infinity,
+      core: Infinity,
+      coreCables: Infinity
+    };
+    const addSegment = (kind, id, reportKey, positionA, positionB, velocityA, velocityB, radius) => {
+      segments.push({
+        key: `${kind}:${id}`, kind, id, reportKey,
+        positionA, positionB, velocityA, velocityB, radius
+      });
+    };
+    this.rover.bars.forEach(([i, j], index) =>
+      addSegment('rod', `R${index+1}`, 'bars', this.q[i], this.q[j], this.v[i], this.v[j], 0.035));
+    this.rover.outerStrings.forEach(([i, j], index) =>
+      addSegment('outer-cable', `C${String(index+1).padStart(2, '0')}`, 'outerCables',
+        this.q[i], this.q[j], this.v[i], this.v[j], 0.012));
+    this.q.forEach((position, index) =>
+      addSegment('core-cable', `PC${String(index+1).padStart(2, '0')}`, 'coreCables',
+        position, this.corePosition, this.v[index], this.coreVelocity, 0.006));
+
+    const projectPoint = (position, velocity, radius) => {
+      const surface = this.terrain.eval(position[0], position[1]);
+      const clearance = position[2]-surface.h-radius;
+      const minimumZ = surface.h+radius+this.cfg.terrainClearanceEpsilon;
+      if (position[2] >= minimumZ) return clearance;
+      const correction = minimumZ-position[2];
+      position[2] = minimumZ;
+      maximumLocalCorrection = Math.max(maximumLocalCorrection, correction);
+      const normalLength = Math.hypot(surface.dhdx, surface.dhdy, 1);
+      const normal = [-surface.dhdx/normalLength, -surface.dhdy/normalLength, 1/normalLength];
+      const inwardSpeed = velocity[0]*normal[0]+velocity[1]*normal[1]+velocity[2]*normal[2];
+      if (inwardSpeed < 0) {
+        velocity[0] -= inwardSpeed*normal[0];
+        velocity[1] -= inwardSpeed*normal[1];
+        velocity[2] -= inwardSpeed*normal[2];
+      }
+      return this.cfg.terrainClearanceEpsilon;
+    };
+
+    const projectSegment = segment => {
+      let deepest = null;
+      let minimumClearance = Infinity;
+      const parameters = this.terrain.memberCollisionParameters(segment.positionA, segment.positionB);
+      for (const t of parameters) {
+        const x = segment.positionA[0]*(1-t)+segment.positionB[0]*t;
+        const y = segment.positionA[1]*(1-t)+segment.positionB[1]*t;
+        const z = segment.positionA[2]*(1-t)+segment.positionB[2]*t;
+        const surface = this.terrain.eval(x, y);
+        const clearance = z-surface.h-segment.radius;
+        minimumClearance = Math.min(minimumClearance, clearance);
+        const correction = MEMBER_COLLISION_SKIN+this.cfg.terrainClearanceEpsilon-clearance;
+        if (correction > 0 && (!deepest || correction > deepest.correction)) {
+          deepest = { x, y, surface, correction, t };
         }
       }
-      for (const [i, j] of this.rover.bars) {
-        for (const t of [0.2, 0.4, 0.6, 0.8]) {
-          const x = this.q[i][0]*(1-t)+this.q[j][0]*t;
-          const y = this.q[i][1]*(1-t)+this.q[j][1]*t;
-          const z = this.q[i][2]*(1-t)+this.q[j][2]*t;
-          const minimumZ = this.terrain.eval(x, y).h+0.035+this.cfg.terrainClearanceEpsilon;
-          if (z < minimumZ) {
-            const correction = minimumZ-z;
-            this.q[i][2] += correction;
-            this.q[j][2] += correction;
-            maximumLocalCorrection = Math.max(maximumLocalCorrection, correction);
-          }
+      if (!deepest) return minimumClearance;
+      segment.positionA[2] += deepest.correction;
+      segment.positionB[2] += deepest.correction;
+      maximumLocalCorrection = Math.max(maximumLocalCorrection, deepest.correction);
+      const normalLength = Math.hypot(deepest.surface.dhdx, deepest.surface.dhdy, 1);
+      const normal = [
+        -deepest.surface.dhdx/normalLength,
+        -deepest.surface.dhdy/normalLength,
+        1/normalLength
+      ];
+      const sampleVelocity = normal.reduce((sum, component, axis) => sum+component*(
+        segment.velocityA[axis]*(1-deepest.t)+segment.velocityB[axis]*deepest.t), 0);
+      if (sampleVelocity < 0) {
+        for (let axis = 0; axis < 3; axis++) {
+          segment.velocityA[axis] -= sampleVelocity*normal[axis];
+          segment.velocityB[axis] -= sampleVelocity*normal[axis];
         }
       }
+      const previous = memberContactMap.get(segment.key);
+      if (!previous || deepest.correction > previous.correction) {
+        memberContactMap.set(segment.key, {
+          kind: segment.kind,
+          id: segment.id,
+          objectId: this.terrain.objectAt(deepest.x, deepest.y),
+          position: [deepest.x, deepest.y, deepest.surface.h],
+          normal,
+          normalForce: this.cfg.kg*Math.pow(deepest.correction, 1.5),
+          frictionForce: [0, 0, 0],
+          correction: deepest.correction
+        });
+      }
+      return minimumClearance+deepest.correction;
+    };
+
+    for (let node = 0; node < this.q.length; node++) {
+      clearanceReport.nodes = Math.min(clearanceReport.nodes,
+        projectPoint(this.q[node], this.v[node], this.cfg.nodeRadius));
     }
-    return { clearance: this.minimumTerrainClearance(true), lift: maximumLocalCorrection };
+    clearanceReport.core = projectPoint(
+      this.corePosition, this.coreVelocity, this.rover.R_core);
+    // Each correction translates both endpoints upward. Later corrections
+    // can only increase the clearance of an already-checked segment, so one
+    // conservative pass is sufficient and avoids a second full terrain scan.
+    for (const segment of segments) {
+      clearanceReport[segment.reportKey] = Math.min(
+        clearanceReport[segment.reportKey], projectSegment(segment));
+    }
+    clearanceReport.minimum = Math.min(...Object.values(clearanceReport));
+    return {
+      clearance: clearanceReport.minimum,
+      clearanceReport,
+      lift: maximumLocalCorrection,
+      memberContacts: [...memberContactMap.values()]
+    };
   }
 
   calcOuterCableForce(idx, ell, v_rel, actuationOffset) {
@@ -1127,7 +1719,7 @@ export class Simulation {
     if (omega > this.metrics.maxAngularVelocity) this.metrics.maxAngularVelocity = omega;
 
     // Obstacle sensing remains continuous, but actuator decisions are updated
-    // only by the independent 20 Hz controller clock below.
+    // only by the independent fixed-rate controller clock below.
     const obstacle = this.senseObstacleAhead(cx, cy, cvy);
 
     if (this.t+1e-12 >= this.nextControllerUpdate) {
@@ -1273,9 +1865,11 @@ export class Simulation {
 
     // 3. Ground Contact
     const contactNodes = [];
+    const contactDetails = [];
     let actuationTraction = 0;
     let actuationRollTorque = 0;
     if (cfg.enableGround) {
+      const contactCandidates = [];
       for (let i = 0; i < n; i++) {
         const surf = this.terrain.eval(q[i][0], q[i][1]);
         const zGround = surf.h;
@@ -1283,38 +1877,59 @@ export class Simulation {
         const beta = cfg.contactSmoothBeta;
         const smoothPenetration = 0.5*(Math.sqrt(signedPenetration*signedPenetration + beta*beta) + signedPenetration);
         const contactBlend = 0.5*(signedPenetration/Math.sqrt(signedPenetration*signedPenetration + beta*beta) + 1);
-
         if (signedPenetration > -4*beta) {
-          contactNodes.push(i);
-          const normalLength = Math.hypot(surf.dhdx, surf.dhdy, 1);
-          const normal = [-surf.dhdx/normalLength, -surf.dhdy/normalLength, 1/normalLength];
-          const normalVelocity = v[i][0]*normal[0]+v[i][1]*normal[1]+v[i][2]*normal[2];
-          const springForce = cfg.kg*Math.pow(smoothPenetration, 1.5);
-          const dampingForce = -cfg.cg*contactBlend*Math.min(0, normalVelocity);
-          const normalForce = Math.max(0, springForce+dampingForce);
-
-          fNode[i][0] += normalForce*normal[0];
-          fNode[i][1] += normalForce*normal[1];
-          fNode[i][2] += normalForce*normal[2];
-
-          // Coulomb friction acts in the terrain tangent plane. A small
-          // load-floor represents the constraint reaction carried by a node
-          // resting exactly on the hard non-penetration boundary.
-          const tangentX = v[i][0]-normalVelocity*normal[0];
-          const tangentY = v[i][1]-normalVelocity*normal[1];
-          const tangentZ = v[i][2]-normalVelocity*normal[2];
-          const slip = Math.hypot(tangentX, tangentY, tangentZ);
-          if (slip > 1e-5) {
-            const mu = slip < 0.04 ? cfg.mu_g : 0.82*cfg.mu_g;
-            const supportLoad = Math.max(normalForce, 0.5*this.dynamicNodeMass*Math.abs(cfg.gravity[2]));
-            const frictionLimit = mu*supportLoad;
-            const desiredFriction = this.dynamicNodeMass*slip/0.025+cfg.c_gt*slip;
-            const friction = Math.min(frictionLimit, desiredFriction);
-            fNode[i][0] -= friction*tangentX/slip;
-            fNode[i][1] -= friction*tangentY/slip;
-            fNode[i][2] -= friction*tangentZ/slip;
-          }
+          contactCandidates.push({ i, surf, zGround, smoothPenetration, contactBlend });
         }
+      }
+      const totalMass = n*this.dynamicNodeMass+cfg.coreMass;
+      const supportedWeightPerContact = totalMass*Math.abs(cfg.gravity[2])/
+        Math.max(1, contactCandidates.length);
+      for (const candidate of contactCandidates) {
+        const { i, surf, zGround, smoothPenetration, contactBlend } = candidate;
+        contactNodes.push(i);
+        const normalLength = Math.hypot(surf.dhdx, surf.dhdy, 1);
+        const normal = [-surf.dhdx/normalLength, -surf.dhdy/normalLength, 1/normalLength];
+        const normalVelocity = v[i][0]*normal[0]+v[i][1]*normal[1]+v[i][2]*normal[2];
+        const springForce = cfg.kg*Math.pow(smoothPenetration, 1.5);
+        const dampingForce = -cfg.cg*contactBlend*Math.min(0, normalVelocity);
+        const normalForce = Math.max(0, springForce+dampingForce);
+        // A hard constraint at zero penetration still carries the rover's
+        // supported weight. Using only node self-weight made the Coulomb
+        // envelope far too small and caused Model B to skate over rocks.
+        const reportedNormalForce = Math.max(normalForce, supportedWeightPerContact);
+        const frictionForce = [0, 0, 0];
+
+        fNode[i][0] += normalForce*normal[0];
+        fNode[i][1] += normalForce*normal[1];
+        fNode[i][2] += normalForce*normal[2];
+
+        const tangentX = v[i][0]-normalVelocity*normal[0];
+        const tangentY = v[i][1]-normalVelocity*normal[1];
+        const tangentZ = v[i][2]-normalVelocity*normal[2];
+        const slip = Math.hypot(tangentX, tangentY, tangentZ);
+        if (slip > 1e-5) {
+          const mu = slip < 0.04 ? cfg.mu_g : 0.82*cfg.mu_g;
+          const frictionLimit = mu*reportedNormalForce;
+          const effectiveSupportedMass = totalMass/Math.max(1, contactCandidates.length);
+          const desiredFriction = effectiveSupportedMass*slip/0.025+cfg.c_gt*slip;
+          const friction = Math.min(frictionLimit, desiredFriction);
+          frictionForce[0] = -friction*tangentX/slip;
+          frictionForce[1] = -friction*tangentY/slip;
+          frictionForce[2] = -friction*tangentZ/slip;
+          fNode[i][0] += frictionForce[0];
+          fNode[i][1] += frictionForce[1];
+          fNode[i][2] += frictionForce[2];
+        }
+        contactDetails.push({
+          kind: 'node',
+          id: `N${i+1}`,
+          nodeIndex: i,
+          objectId: this.terrain.objectAt(q[i][0], q[i][1]),
+          position: [q[i][0], q[i][1], zGround],
+          normal: normal.slice(),
+          normalForce: reportedNormalForce,
+          frictionForce
+        });
       }
     }
 
@@ -1331,7 +1946,8 @@ export class Simulation {
         const direction = [desired[0]/desiredNorm, desired[1]/desiredNorm];
         const rollAxis = [direction[1], -direction[0], 0];
         const rollingRate = -(omegaVector[0]*rollAxis[0]+omegaVector[1]*rollAxis[1]);
-        const targetRollingRate = cfg.targetSpeed/Math.max(this.rover.R_outer, 0.1);
+        const learnedTargetSpeed = cfg.targetSpeed*(this.learningCommand?.speedScale || 1);
+        const targetRollingRate = learnedTargetSpeed/Math.max(this.rover.R_outer, 0.1);
         const phaseScale = this.locomotionState === 'PRELOAD' ? 0.35
           : this.locomotionState === 'SHIFT_COM' ? 0.70 : 1.0;
         const contactSet = new Set(contactNodes);
@@ -1352,7 +1968,8 @@ export class Simulation {
         const coupleForceLimit = cfg.rollCoupleLimitRatio*cfg.mu_g*totalMass*Math.abs(cfg.gravity[2]);
         const torqueLimit = coupleForceLimit*leverArm;
         actuationRollTorque = clampValue(
-          cfg.rollTorqueGain*(targetRollingRate-rollingRate)*phaseScale,
+          cfg.rollTorqueGain*(this.learningCommand?.torqueScale || 1)*
+            (targetRollingRate-rollingRate)*phaseScale,
           -torqueLimit,
           torqueLimit
         );
@@ -1372,8 +1989,27 @@ export class Simulation {
         // It cannot move a non-rotating shell, which removes the old dragged
         // appearance while still letting contact friction translate rotation.
         const rollingSurfaceSpeed = rollingRate*this.rover.R_outer;
-        const rollingError = rollingSurfaceSpeed-forwardSpeed;
-        const requested = totalMass*cfg.rollingConstraintGain*rollingError;
+        const rollingConstraintSpeed = this.terrain.course
+          ? Math.max(0, rollingSurfaceSpeed)
+          : rollingSurfaceSpeed;
+        const rollingError = rollingConstraintSpeed-forwardSpeed;
+        let requested = totalMass*cfg.rollingConstraintGain*rollingError;
+        if (this.terrain.course && Math.abs(rollingSurfaceSpeed) > 0) {
+          // Level 10 speed/grade assistance is coupled to measured shell
+          // rotation. A stationary shell therefore receives no forward force:
+          // the zero-net-force roll couple must start and sustain locomotion.
+          const rotationAuthority = smoothStep01(
+            Math.abs(rollingSurfaceSpeed)/Math.max(0.20*learnedTargetSpeed, 0.08)
+          );
+          const speedError = clampValue(
+            learnedTargetSpeed-forwardSpeed, -learnedTargetSpeed, learnedTargetSpeed);
+          const surface = this.terrain.eval(cx, cy);
+          const uphillGrade = Math.max(0, surface.dhdx*direction[0]+surface.dhdy*direction[1]);
+          requested += totalMass*cfg.courseSpeedGain*(this.learningCommand?.tractionScale || 1)*
+            speedError*rotationAuthority;
+          requested += totalMass*Math.abs(cfg.gravity[2])*cfg.courseGradeCompensationGain*
+            uphillGrade*rotationAuthority;
+        }
         actuationTraction = clampValue(requested, -coulombLimit, coulombLimit);
         const perContact = actuationTraction/contactNodes.length;
         for (const node of contactNodes) {
@@ -1392,7 +2028,8 @@ export class Simulation {
           const dx = q[i][0] - rock.x;
           const dy = q[i][1] - rock.y;
           const centerDistance = Math.sqrt(dx*dx + dy*dy);
-          const surfaceDistance = Math.max(0.04, centerDistance-rock.r);
+          const rockRadius = Math.max(rock.rx || rock.r || 0.2, rock.ry || rock.r || 0.2);
+          const surfaceDistance = Math.max(0.04, centerDistance-rockRadius);
           if (surfaceDistance <= sensingRadius && centerDistance > 1e-6) {
             const magnitude = Math.min(18.0, cfg.obstacleAvoidanceGain *
               (Math.pow(surfaceDistance, -gamma)-Math.pow(sensingRadius, -gamma)));
@@ -1471,8 +2108,70 @@ export class Simulation {
       }
     }
 
+    // Keep each complete shell inside its own lane before resolving the
+    // terrain at the corrected x positions. The translation is lateral only
+    // and applies equally to every component, preserving all rod lengths.
+    const corridorProjection = this.enforcePathCorridor();
+    if (corridorProjection.boundaryHit) this.metrics.corridorBoundaryHits++;
+
     // Final hard collision projection catches sub-millimetre roundoff.
     const terrainProjection = this.enforceTerrainNonPenetration();
+    for (const component of ['nodes', 'bars', 'outerCables', 'core', 'coreCables']) {
+      this.metrics.minimumTerrainClearances[component] = Math.min(
+        this.metrics.minimumTerrainClearances[component],
+        terrainProjection.clearanceReport[component]
+      );
+    }
+
+    // Coulomb-bounded velocity solve at the finalized contact positions.
+    // Matching centroid translation to measured shell rotation converts spin
+    // into rolling without a drag force: a non-rotating shell receives no
+    // forward velocity. A smaller lateral correction dissipates side-skate.
+    if (cfg.enableGround && this.modelType === 'adaptive' && contactNodes.length) {
+      let projectedCx = 0, projectedCy = 0, projectedCz = 0;
+      let projectedVx = 0, projectedVy = 0, projectedVz = 0;
+      for (let node = 0; node < n; node++) {
+        projectedCx += q[node][0]; projectedCy += q[node][1]; projectedCz += q[node][2];
+        projectedVx += v[node][0]; projectedVy += v[node][1]; projectedVz += v[node][2];
+      }
+      projectedCx /= n; projectedCy /= n; projectedCz /= n;
+      projectedVx /= n; projectedVy /= n; projectedVz /= n;
+      const directionRaw = this.controlDiagnostics.desiredDirection || [0, 1, 0];
+      const directionLength = Math.hypot(directionRaw[0], directionRaw[1]);
+      if (directionLength > 1e-9) {
+        const direction = [directionRaw[0]/directionLength, directionRaw[1]/directionLength];
+        const lateral = [-direction[1], direction[0]];
+        const projectedOmega = this.calcAngularVelocityVector(
+          projectedCx, projectedCy, projectedCz,
+          projectedVx, projectedVy, projectedVz
+        );
+        const rollAxis = [direction[1], -direction[0]];
+        const rollingSurfaceSpeed = -(
+          projectedOmega[0]*rollAxis[0]+projectedOmega[1]*rollAxis[1]
+        )*this.rover.R_outer;
+        const forwardSpeed = projectedVx*direction[0]+projectedVy*direction[1];
+        const lateralSpeed = projectedVx*lateral[0]+projectedVy*lateral[1];
+        const maximumDelta = 0.82*cfg.mu_g*Math.abs(cfg.gravity[2])*dt;
+        const forwardDelta = clampValue(
+          (cfg.adaptiveContactGrip || 0.72)*(rollingSurfaceSpeed-forwardSpeed),
+          -maximumDelta,
+          maximumDelta
+        );
+        const lateralDelta = clampValue(
+          -0.55*(cfg.adaptiveContactGrip || 0.72)*lateralSpeed,
+          -0.65*maximumDelta,
+          0.65*maximumDelta
+        );
+        const deltaX = forwardDelta*direction[0]+lateralDelta*lateral[0];
+        const deltaY = forwardDelta*direction[1]+lateralDelta*lateral[1];
+        for (const velocity of v) {
+          velocity[0] += deltaX;
+          velocity[1] += deltaY;
+        }
+        this.coreVelocity[0] += deltaX;
+        this.coreVelocity[1] += deltaY;
+      }
+    }
 
     // Position projection alone leaves a velocity component that immediately
     // tries to stretch each rigid bar again. Remove that component so the
@@ -1606,6 +2305,7 @@ export class Simulation {
 
     const curVel = Math.hypot(cvx, cvy);
     this.metrics.timeElapsed = this.t;
+    this.metrics.maximumPathOffset = Math.max(this.metrics.maximumPathOffset, Math.abs(cx));
     const segmentDx = cx-this.prevMetricPosition[0];
     const segmentDy = cy-this.prevMetricPosition[1];
     const segmentDistance = Math.hypot(segmentDx, segmentDy);
@@ -1628,10 +2328,13 @@ export class Simulation {
         this.metrics.speedVariance = this.speedSamples.reduce((sum, value) => sum+(value-mean)**2, 0)/this.speedSamples.length;
       }
     }
-    if (this.terrain.course && cy >= cfg.courseGoalY && !this.metrics.courseComplete) {
+    const allCrestsReached = this.modelType !== 'adaptive'
+      || !this.obstacleTracker
+      || this.obstacleTracker.summary().allCheckpointsReached;
+    if (this.terrain.course && cy >= cfg.courseGoalY && allCrestsReached && !this.metrics.courseComplete) {
       this.metrics.courseComplete = true;
       this.measuredRunCompletedAt = this.t;
-      this.metrics.completionTime = this.metrics.measuredTime;
+      this.metrics.completionTime = this.t;
     }
     if (curVel > this.metrics.maxVelocity) this.metrics.maxVelocity = curVel;
     if (postOmega > this.metrics.maxAngularVelocity) this.metrics.maxAngularVelocity = postOmega;
@@ -1640,7 +2343,7 @@ export class Simulation {
     this.metrics.completedRolls = this.completedRolls;
     if (this.obstacleTracker) {
       const baseHeight = this.terrain.evalBase(cx, cy).h;
-      this.metrics.obstacleSummary = this.obstacleTracker.update({ x: cx, y: cy, z: cz, baseHeight });
+      this.metrics.obstacleSummary = this.obstacleTracker.update({ x: cx, y: cy, z: cz, baseHeight, time: this.t });
       this.metrics.successfulObstacles = this.metrics.obstacleSummary.over;
       this.metrics.failedAttempts = this.metrics.obstacleSummary.retries;
     }
@@ -1658,6 +2361,25 @@ export class Simulation {
 
     const relaxedCount = this.relaxedCableFlags.reduce((count, active) => count + (active ? 1 : 0), 0);
     const relaxationFraction = relaxedCount / Math.max(1, this.relaxedCableFlags.length);
+
+    const monitoring = this.monitor?.sample({
+      time: this.t,
+      q,
+      centroid: [cx, cy, cz],
+      velocity: [cvx, cvy, cvz],
+      cableForces: outerCableForces,
+      actuationOffsets: this.currentActuationOffsets,
+      relaxedFlags: this.relaxedCableFlags,
+      contacts: [...contactDetails, ...(terrainProjection.memberContacts || [])],
+      constraintError,
+      terrainClearance: terrainProjection.clearance,
+      terrainClearanceComponents: terrainProjection.clearanceReport,
+      distanceTraveled: this.metrics.distanceTraveled
+    }) || null;
+    if (monitoring) {
+      this.metrics.goalReached = monitoring.goalReached;
+      this.metrics.goalResult = monitoring.goalResult;
+    }
 
     const deformScore = Math.max(0, 1.0 - (deformRMS / (this.rover.R_outer * 0.25)));
     const accelScore = Math.max(0, Math.exp(-(centroidAccelMagG - 1.0) / 2.5));
@@ -1704,7 +2426,9 @@ export class Simulation {
       kineticEnergy,
       completedRolls: this.completedRolls,
       terrainClearance: terrainProjection.clearance,
+      terrainClearanceComponents: terrainProjection.clearanceReport,
       terrainLiftCorrection: terrainProjection.lift,
+      pathCorridor: { ...corridorProjection, centreX: cx },
       corePosition: this.corePosition.slice(),
       coreVelocity: this.coreVelocity.slice(),
       coreCableForces: this.coreCableForces.slice(),
@@ -1713,8 +2437,19 @@ export class Simulation {
       obstacleSummary: this.metrics.obstacleSummary,
       gaitState: this.locomotionState,
       actuationTraction,
-      actuationRollTorque
+      actuationRollTorque,
+      monitoring,
+      learning: this.routeLearner?.snapshot(this.learningCommand) || this.metrics.learning,
+      contacts: monitoring?.contacts || contactDetails,
+      cableTelemetry: monitoring?.cables || []
     };
+
+    if (this.terrain.course && !this.runFinalized) {
+      const deadline = cfg.missionDeadlineSeconds || cfg.T_end;
+      if (this.metrics.courseComplete) this.finalizeRun('goal');
+      else if (this.t >= deadline-1e-9) this.finalizeRun('timeout');
+      this.currentDiag.learning = this.metrics.learning;
+    }
 
     if (this.stepCount % 20 === 0) {
       this.history.t.push(this.t);
@@ -1772,7 +2507,7 @@ export class BenchmarkEngine {
         abCourseEnabled: expId === 10,
         targetGoalY: expId === 10 ? 60 : 25,
         targetDestination: [0, expId === 10 ? 60 : 25],
-        T_end: expId === 10 ? 320 : 40,
+        T_end: expId === 10 ? LEVEL10_PERFORMANCE.timeLimit : 40,
         actuationMode: actMode,
         gaitFrequency: freq,
         actuationDeltaL: deltaL,
@@ -1781,6 +2516,8 @@ export class BenchmarkEngine {
         kS: baseConfig.kS || 1200.0,
         enableDiagnosticsLog: false
       }));
+      if (expId === 10) cfg.applyLevel10PerformanceProfile();
+      else cfg.applyStandardPerformanceProfile();
 
       const rover = new SphericalRoverModel(cfg);
       const terrain = new TerrainModel(cfg);
