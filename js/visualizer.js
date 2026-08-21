@@ -32,6 +32,8 @@ export class Visualizer {
   }
 
   initThree() {
+    if (this.resizeObserver) this.resizeObserver.disconnect();
+    if (this.renderer) this.renderer.dispose();
     const width = this.container.clientWidth || 600;
     const height = this.container.clientHeight || 450;
 
@@ -99,9 +101,11 @@ export class Visualizer {
 
   createTerrainMesh() {
     const Nx = 80;
-    const Ny = 240;
-    const xMin = -8, xMax = 8;
-    const yMin = -4, yMax = 45;
+    const Ny = this.terrainModel.course ? 320 : 240;
+    const xMin = this.terrainModel.course ? -5 : -8;
+    const xMax = this.terrainModel.course ? 5 : 8;
+    const yMin = this.terrainModel.course ? 0 : -4;
+    const yMax = this.terrainModel.course ? 70 : 45;
 
     const geometry = new THREE.PlaneGeometry(xMax - xMin, yMax - yMin, Nx, Ny);
     const posAttr = geometry.attributes.position;
@@ -117,7 +121,12 @@ export class Visualizer {
       const worldX = localX;
       const worldY = localY + (yMin + yMax) / 2;
 
-      const surf = this.terrainModel.eval(worldX, worldY);
+      // In comparison mode, show two visually separated copies of the exact
+      // same physical course (A at -1.5 m, B at +1.5 m).
+      const physicsX = this.terrainModel.course
+        ? worldX-(worldX < 0 ? -1.5 : 1.5)
+        : worldX;
+      const surf = this.terrainModel.eval(physicsX, worldY);
       posAttr.setZ(i, surf.h);
 
       const ratio = (surf.h + 0.4) / 1.0;
@@ -141,13 +150,13 @@ export class Visualizer {
     this.scene.add(this.terrainMesh);
 
     // Subtle Sci-Fi Grid overlay
-    const grid = new THREE.GridHelper(50, 50, 0x06b6d4, 0x334155);
+    const grid = new THREE.GridHelper(this.terrainModel.course ? 70 : 50, this.terrainModel.course ? 70 : 50, 0x06b6d4, 0x334155);
     grid.rotation.x = Math.PI / 2;
-    grid.position.set(0, 20, -0.05);
+    grid.position.set(0, (yMin+yMax)/2, -0.05);
     this.scene.add(grid);
 
-    // Glowing Finish Line Gate Arch at Target Endpoint (y = 25.0m)
-    const goalY = 25.0;
+    // Glowing Finish Line Gate Arch at the configured endpoint.
+    const goalY = this.terrainModel.course?.goalY || this.terrainModel.cfg.targetGoalY || 25.0;
     const gateGroup = new THREE.Group();
     const pillarGeom = new THREE.CylinderGeometry(0.12, 0.15, 3.5, 16);
     const pillarMat = new THREE.MeshStandardMaterial({
@@ -186,6 +195,30 @@ export class Visualizer {
 
     this.scene.add(gateGroup);
 
+    if (this.terrainModel.course) {
+      const startY = this.terrainModel.course.startY;
+      const startMaterial = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.72
+      });
+      const startLine = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.28), startMaterial);
+      startLine.position.set(0, startY, this.terrainModel.eval(0, startY).h+0.025);
+      this.scene.add(startLine);
+
+      const ringGeometry = new THREE.RingGeometry(0.31, 0.36, 32);
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b, side: THREE.DoubleSide, transparent: true, opacity: 0.78
+      });
+      for (const obstacle of this.terrainModel.course.obstacles) {
+        for (const laneOffset of [-1.5, 1.5]) {
+          const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+          ring.scale.set(obstacle.radiusX/0.36, obstacle.radiusY/0.36, 1);
+          ring.position.set(obstacle.x+laneOffset, obstacle.y,
+            this.terrainModel.eval(obstacle.x, obstacle.y).h+0.018);
+          this.scene.add(ring);
+        }
+      }
+    }
+
     // Render Boulders & Rocks
     if (this.terrainModel.rocks) {
       for (let rock of this.terrainModel.rocks) {
@@ -204,124 +237,144 @@ export class Visualizer {
     }
   }
 
+// SCRATCHPAD VISUALIZER DUAL
+
   createRoverObjects() {
-    this.nodeMeshes = [];
-    this.strutMeshes = [];
-    this.outerCableMeshes = [];
-    this.coreCableMeshes = [];
-
+    this.models = {
+      A: { nodeMeshes: [], strutMeshes: [], outerCableMeshes: [], coreCableMeshes: [], coreMesh: null },
+      B: { nodeMeshes: [], strutMeshes: [], outerCableMeshes: [], coreCableMeshes: [], coreMesh: null }
+    };
     const unitCylGeom = new THREE.CylinderGeometry(1, 1, 1, 12);
-
-    // 1. Outer Strut Nodes (12 Titanium Nodes)
     const nodeGeom = new THREE.SphereGeometry(0.06, 18, 18);
-    const nodeMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8, // Cyan node joints
-      metalness: 0.8,
-      roughness: 0.2,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.5
-    });
 
-    for (let i = 0; i < this.roverModel.nOuter; i++) {
-      const nodeMesh = new THREE.Mesh(nodeGeom, nodeMat);
-      nodeMesh.castShadow = true;
-      this.scene.add(nodeMesh);
-      this.nodeMeshes.push(nodeMesh);
-    }
+    const createModelMeshes = (modelKey, colorTint) => {
+      const m = this.models[modelKey];
+      const nodeMat = new THREE.MeshStandardMaterial({ color: colorTint.node, metalness: 0.8, roughness: 0.2, emissive: colorTint.nodeE, emissiveIntensity: 0.5 });
+      for (let i = 0; i < this.roverModel.nOuter; i++) {
+        const nodeMesh = new THREE.Mesh(nodeGeom, nodeMat);
+        nodeMesh.castShadow = true;
+        this.scene.add(nodeMesh);
+        m.nodeMeshes.push(nodeMesh);
+      }
 
-    // 2. Outer Compression Struts (6 Sleek Metallic Rods)
-    for (let b = 0; b < this.roverModel.bars.length; b++) {
-      const strutMat = new THREE.MeshStandardMaterial({
-        color: 0x3b82f6, // Royal Blue compression strut
-        metalness: 0.85,
-        roughness: 0.15,
-        emissive: 0x1d4ed8,
-        emissiveIntensity: 0.3
+      for (let b = 0; b < this.roverModel.bars.length; b++) {
+        const strutMat = new THREE.MeshStandardMaterial({ color: colorTint.bar, metalness: 0.85, roughness: 0.15, emissive: colorTint.barE, emissiveIntensity: 0.3 });
+        const mesh = new THREE.Mesh(unitCylGeom, strutMat);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+        m.strutMeshes.push({ mesh, radius: 0.035, material: strutMat });
+      }
+
+      for (let s = 0; s < this.roverModel.outerStrings.length; s++) {
+        const cableMat = new THREE.MeshStandardMaterial({ color: colorTint.cable, metalness: 0.4, roughness: 0.3, emissive: colorTint.cableE, emissiveIntensity: 0.4 });
+        const mesh = new THREE.Mesh(unitCylGeom, cableMat);
+        this.scene.add(mesh);
+        m.outerCableMeshes.push({ mesh, radius: 0.012, material: cableMat });
+      }
+
+      const coreMaterial = new THREE.MeshStandardMaterial({
+        color: modelKey === 'B' ? 0x10b981 : 0x94a3b8,
+        emissive: modelKey === 'B' ? 0x047857 : 0x334155,
+        emissiveIntensity: 0.9, metalness: 0.55, roughness: 0.22
       });
-      const mesh = new THREE.Mesh(unitCylGeom, strutMat);
-      mesh.castShadow = true;
-      this.scene.add(mesh);
-      this.strutMeshes.push({ mesh, radius: 0.035, material: strutMat });
-    }
+      m.coreMesh = new THREE.Mesh(new THREE.SphereGeometry(this.roverModel.R_core, 20, 20), coreMaterial);
+      m.coreMesh.castShadow = true;
+      this.scene.add(m.coreMesh);
+      for (let i = 0; i < this.roverModel.nOuter; i++) {
+        const material = new THREE.MeshStandardMaterial({
+          color: modelKey === 'B' ? 0x34d399 : 0x64748b,
+          emissive: modelKey === 'B' ? 0x059669 : 0x1e293b,
+          emissiveIntensity: 0.45, transparent: true, opacity: 0.82
+        });
+        const mesh = new THREE.Mesh(unitCylGeom, material);
+        this.scene.add(mesh);
+        m.coreCableMeshes.push({ mesh, radius: 0.006, material });
+      }
+    };
 
-    // 3. Outer Pre-tensioned Tension Cables (24 Cables)
-    for (let s = 0; s < this.roverModel.outerStrings.length; s++) {
-      const cableMat = new THREE.MeshStandardMaterial({
-        color: 0xef4444, // Red cable
-        metalness: 0.4,
-        roughness: 0.3,
-        emissive: 0xdc2626,
-        emissiveIntensity: 0.4
-      });
-      const mesh = new THREE.Mesh(unitCylGeom, cableMat);
-      this.scene.add(mesh);
-      this.outerCableMeshes.push({ mesh, radius: 0.012, material: cableMat });
-    }
+    createModelMeshes('A', { node: 0x64748b, nodeE: 0x334155, bar: 0x475569, barE: 0x1e293b, cable: 0x94a3b8, cableE: 0x64748b }); // Stiff baseline: Gray/Slate
+    createModelMeshes('B', { node: 0x38bdf8, nodeE: 0x0284c7, bar: 0x3b82f6, barE: 0x1d4ed8, cable: 0xef4444, cableE: 0xdc2626 }); // Adaptive: Bright colors
 
-    // 4. CENTRAL PAYLOAD CORE (Radius R_core = 0.1D = 0.10 m)
-    const coreGeom = new THREE.SphereGeometry(this.roverModel.R_core, 28, 28);
-    const coreMat = new THREE.MeshPhysicalMaterial({
-      color: 0x10b981, // Emerald green sensor payload core
-      metalness: 0.7,
-      roughness: 0.1,
-      transmission: 0.3,
-      emissive: 0x059669,
-      emissiveIntensity: 0.6
-    });
-    this.coreMesh = new THREE.Mesh(coreGeom, coreMat);
-    this.coreMesh.castShadow = true;
-    this.scene.add(this.coreMesh);
-
-    // Inner Core LED Halo
-    const coreHaloGeom = new THREE.SphereGeometry(this.roverModel.R_core * 1.12, 16, 16);
-    const coreHaloMat = new THREE.MeshBasicMaterial({
-      color: 0x34d399,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5
-    });
-    this.coreHaloMesh = new THREE.Mesh(coreHaloGeom, coreHaloMat);
-    this.coreMesh.add(this.coreHaloMesh);
-
-    // 5. Inner Core Radial Suspension Cables (12 Radial Cables)
-    for (let i = 0; i < this.roverModel.nOuter; i++) {
-      const coreCableMat = new THREE.MeshStandardMaterial({
-        color: 0x10b981, // Emerald suspension cable
-        metalness: 0.5,
-        roughness: 0.2,
-        emissive: 0x047857,
-        emissiveIntensity: 0.5
-      });
-      const mesh = new THREE.Mesh(unitCylGeom, coreCableMat);
-      this.scene.add(mesh);
-      this.coreCableMeshes.push({ mesh, radius: 0.008, material: coreCableMat });
-    }
-
-    // Velocity Vector Indicator Arrow
-    this.velArrow = new THREE.ArrowHelper(
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, 0, 0),
-      0.8,
-      0xf59e0b
-    );
+    this.velArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 0.8, 0xf59e0b);
     this.scene.add(this.velArrow);
+
+    this.controlArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 1.0, 0x8b5cf6, 0.18, 0.09);
+    this.scene.add(this.controlArrow);
+
+    this.comMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 18, 18),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92 })
+    );
+    this.scene.add(this.comMarker);
+
+    this.contactMarkers = [];
+    const contactGeometry = new THREE.SphereGeometry(0.085, 14, 14);
+    for (let i = 0; i < this.roverModel.nOuter; i++) {
+      const marker = new THREE.Mesh(contactGeometry, new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.72 }));
+      marker.visible = false;
+      this.scene.add(marker);
+      this.contactMarkers.push(marker);
+    }
+
+    this.supportFaceMesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false })
+    );
+    this.scene.add(this.supportFaceMesh);
+
+    this.tippingEdgeLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.98 })
+    );
+    this.scene.add(this.tippingEdgeLine);
+
+    this.predictionLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0.1, 0)]),
+      new THREE.LineDashedMaterial({ color: 0xc084fc, dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85 })
+    );
+    this.predictionLine.computeLineDistances();
+    this.scene.add(this.predictionLine);
+
+    // Add 3D text sprite for Model B State
+    this.stateSprite = this.createTextSprite("ROLLING");
+    this.stateSpriteMessage = "ROLLING";
+    this.scene.add(this.stateSprite);
+  }
+
+  createTextSprite(message) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const context = canvas.getContext('2d');
+    context.font = "Bold 36px monospace";
+    context.fillStyle = "rgba(0,0,0,0.5)";
+    context.fillRect(0,0,canvas.width,canvas.height);
+    context.fillStyle = "rgba(16, 185, 129, 1.0)";
+    context.textAlign = "center";
+    context.fillText(message, 256, 75);
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(3.0, 0.75, 1.0);
+    return sprite;
   }
 
   createTrajectoryTrail() {
-    this.trailPoints = [];
-    const geom = new THREE.BufferGeometry();
-    const mat = new THREE.LineBasicMaterial({
-      color: 0x06b6d4,
-      linewidth: 3
-    });
-    this.trailLine = new THREE.Line(geom, mat);
-    this.scene.add(this.trailLine);
+    this.trailFrame = 0;
+    this.trails = {};
+    for (const [modelKey, color] of [['A', 0x94a3b8], ['B', 0x06b6d4]]) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color, linewidth: 3 })
+      );
+      this.trails[modelKey] = { points: [], line };
+      this.scene.add(line);
+    }
   }
 
   createGeometryCheckpointOverlay() {
     this.checkpointGroup = new THREE.Group();
 
-    // Outer Bounding Sphere Wireframe (Diameter = 1.0D = 2.0m)
+    // Outer Bounding Sphere Wireframe
     const outerGeom = new THREE.SphereGeometry(this.roverModel.R_outer, 24, 24);
     const outerMat = new THREE.MeshBasicMaterial({
       color: 0x06b6d4,
@@ -332,126 +385,177 @@ export class Visualizer {
     this.outerWireMesh = new THREE.Mesh(outerGeom, outerMat);
     this.checkpointGroup.add(this.outerWireMesh);
 
-    // Inner Core Bounding Sphere Wireframe (Diameter = 0.1D = 0.2m)
-    const innerGeom = new THREE.SphereGeometry(this.roverModel.R_core, 16, 16);
-    const innerMat = new THREE.MeshBasicMaterial({
-      color: 0x10b981,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.6
-    });
-    this.innerWireMesh = new THREE.Mesh(innerGeom, innerMat);
-    this.checkpointGroup.add(this.innerWireMesh);
-
     this.checkpointGroup.visible = this.options.showGeometryCheckpoint;
     this.scene.add(this.checkpointGroup);
   }
 
-  update(simState) {
-    const { q, currentDiag, centroid } = simState;
-    if (!q) return;
-
+  updateDual(dualSimState) {
     const yAxis = new THREE.Vector3(0, 1, 0);
 
-    // 1. Update Outer Node Positions
-    for (let i = 0; i < this.roverModel.nOuter; i++) {
-      this.nodeMeshes[i].position.set(q[i][0], q[i][1], q[i][2]);
-    }
+    const updateModel = (modelKey, state, offsetX) => {
+      const { q, diag } = state;
+      if (!q) return;
+      const m = this.models[modelKey];
+      const contracting = new Set(diag.contractingCableIndices || []);
+      const relaxing = new Set(diag.relaxingCableIndices || []);
 
-    // 2. Update Compression Struts
-    for (let b = 0; b < this.roverModel.bars.length; b++) {
-      const idxA = this.roverModel.bars[b][0];
-      const idxB = this.roverModel.bars[b][1];
-      const pA = new THREE.Vector3(...q[idxA]);
-      const pB = new THREE.Vector3(...q[idxB]);
-      const item = this.strutMeshes[b];
-
-      const dir = new THREE.Vector3().subVectors(pB, pA);
-      const len = dir.length();
-      item.mesh.scale.set(item.radius, len, item.radius);
-      item.mesh.position.copy(pA.clone().add(pB).multiplyScalar(0.5));
-      if (len > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, dir.normalize());
-
-      // Force color coding
-      if (this.options.showForceOverlay && currentDiag.strutForces) {
-        const comp = currentDiag.strutForces[b] || 0;
-        if (comp > 50.0) {
-          item.material.color.setHex(0xa855f7); // Glowing purple under heavy compression
-          item.material.emissive.setHex(0x7e22ce);
-        } else {
-          item.material.color.setHex(0x3b82f6); // Royal blue normal
-          item.material.emissive.setHex(0x1d4ed8);
-        }
-      }
-    }
-
-    // 3. Update Outer Tension Cables
-    for (let s = 0; s < this.roverModel.outerStrings.length; s++) {
-      const idxA = this.roverModel.outerStrings[s][0];
-      const idxB = this.roverModel.outerStrings[s][1];
-      const pA = new THREE.Vector3(...q[idxA]);
-      const pB = new THREE.Vector3(...q[idxB]);
-      const item = this.outerCableMeshes[s];
-
-      const dir = new THREE.Vector3().subVectors(pB, pA);
-      const len = dir.length();
-      item.mesh.scale.set(item.radius, len, item.radius);
-      item.mesh.position.copy(pA.clone().add(pB).multiplyScalar(0.5));
-      if (len > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, dir.normalize());
-
-      // Color coding for tension & active actuation
-      if (this.options.showForceOverlay && currentDiag.outerCableActuated) {
-        const isAct = currentDiag.outerCableActuated[s];
-        const tension = currentDiag.outerCableForces ? currentDiag.outerCableForces[s] : 0;
-
-        if (isAct) {
-          item.material.color.setHex(0xf59e0b); // Glowing Gold/Amber when actively contracting
-          item.material.emissive.setHex(0xd97706);
-          item.material.emissiveIntensity = 0.9;
-        } else if (tension > 100.0) {
-          item.material.color.setHex(0x06b6d4); // Bright Cyan under high tension
-          item.material.emissive.setHex(0x0891b2);
-          item.material.emissiveIntensity = 0.7;
-        } else {
-          item.material.color.setHex(0xef4444); // Radiant red baseline pre-tension
-          item.material.emissive.setHex(0xb91c1c);
-          item.material.emissiveIntensity = 0.4;
-        }
-      }
-    }
-
-    // 4. Update Central Payload Core & Radial Suspension Cables
-    const refPos = currentDiag.corePos ? currentDiag.corePos : (centroid || [0, 0, 0]);
-
-    if (currentDiag.corePos) {
-      const coreP = currentDiag.corePos;
-      this.coreMesh.position.set(coreP[0], coreP[1], coreP[2]);
-
-      // Suspension Cables connecting outer nodes to core anchors
       for (let i = 0; i < this.roverModel.nOuter; i++) {
-        const pOuter = new THREE.Vector3(...q[i]);
-        const anchorRel = this.roverModel.coreAnchors[i];
-        const pAnchor = new THREE.Vector3(coreP[0] + anchorRel[0], coreP[1] + anchorRel[1], coreP[2] + anchorRel[2]);
-        const item = this.coreCableMeshes[i];
+        m.nodeMeshes[i].position.set(q[i][0] + offsetX, q[i][1], q[i][2]);
+      }
 
-        const dir = new THREE.Vector3().subVectors(pOuter, pAnchor);
+      for (let b = 0; b < this.roverModel.bars.length; b++) {
+        const idxA = this.roverModel.bars[b][0];
+        const idxB = this.roverModel.bars[b][1];
+        const pA = new THREE.Vector3(q[idxA][0] + offsetX, q[idxA][1], q[idxA][2]);
+        const pB = new THREE.Vector3(q[idxB][0] + offsetX, q[idxB][1], q[idxB][2]);
+        const item = m.strutMeshes[b];
+
+        const dir = new THREE.Vector3().subVectors(pB, pA);
         const len = dir.length();
         item.mesh.scale.set(item.radius, len, item.radius);
-        item.mesh.position.copy(pOuter.clone().add(pAnchor).multiplyScalar(0.5));
+        item.mesh.position.copy(pA.clone().add(pB).multiplyScalar(0.5));
         if (len > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, dir.normalize());
+
+        if (this.options.showForceOverlay && modelKey === 'B' && diag.strutActuated) {
+          if (diag.strutActuated[b]) {
+            item.material.color.setHex(0xf59e0b);
+            item.material.emissive.setHex(0xd97706);
+            item.material.emissiveIntensity = 0.85;
+          } else {
+            item.material.color.setHex(0x3b82f6);
+            item.material.emissive.setHex(0x1d4ed8);
+            item.material.emissiveIntensity = 0.3;
+          }
+        }
+      }
+
+      for (let s = 0; s < this.roverModel.outerStrings.length; s++) {
+        const idxA = this.roverModel.outerStrings[s][0];
+        const idxB = this.roverModel.outerStrings[s][1];
+        const pA = new THREE.Vector3(q[idxA][0] + offsetX, q[idxA][1], q[idxA][2]);
+        const pB = new THREE.Vector3(q[idxB][0] + offsetX, q[idxB][1], q[idxB][2]);
+        const item = m.outerCableMeshes[s];
+
+        const dir = new THREE.Vector3().subVectors(pB, pA);
+        const len = dir.length();
+        item.mesh.scale.set(item.radius, len, item.radius);
+        item.mesh.position.copy(pA.clone().add(pB).multiplyScalar(0.5));
+        if (len > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, dir.normalize());
+
+        if (this.options.showForceOverlay && diag.outerCableActuated && modelKey === 'B') {
+          const isAct = diag.outerCableActuated[s];
+          const tension = diag.outerCableForces ? diag.outerCableForces[s] : 0;
+          const isRelaxed = diag.outerCableRelaxed?.[s];
+          if (relaxing.has(s) || isRelaxed) {
+            item.material.color.setHex(0xe879f9); item.material.emissive.setHex(0xc026d3); item.material.emissiveIntensity = 1.0;
+          } else if (contracting.has(s) || isAct) {
+            item.material.color.setHex(0xf59e0b); item.material.emissive.setHex(0xd97706); item.material.emissiveIntensity = 0.9;
+          } else if (tension > 100.0) {
+            item.material.color.setHex(0x06b6d4); item.material.emissive.setHex(0x0891b2); item.material.emissiveIntensity = 0.7;
+          } else {
+            item.material.color.setHex(0xef4444); item.material.emissive.setHex(0xb91c1c); item.material.emissiveIntensity = 0.4;
+          }
+        }
+      }
+
+      const core = diag.corePosition || diag.centroid;
+      if (core && m.coreMesh) {
+        const corePoint = new THREE.Vector3(core[0]+offsetX, core[1], core[2]);
+        m.coreMesh.position.copy(corePoint);
+        for (let i = 0; i < this.roverModel.nOuter; i++) {
+          const nodePoint = new THREE.Vector3(q[i][0]+offsetX, q[i][1], q[i][2]);
+          const item = m.coreCableMeshes[i];
+          const direction = new THREE.Vector3().subVectors(nodePoint, corePoint);
+          const length = direction.length();
+          item.mesh.scale.set(item.radius, length, item.radius);
+          item.mesh.position.copy(corePoint.clone().add(nodePoint).multiplyScalar(0.5));
+          if (length > 1e-6) item.mesh.quaternion.setFromUnitVectors(yAxis, direction.normalize());
+        }
+      }
+    };
+
+    updateModel('A', dualSimState.simA, -1.5);
+    updateModel('B', dualSimState.simB, 1.5);
+
+    this.trailFrame++;
+    if (this.trailFrame % 8 === 0) {
+      for (const [modelKey, state, offsetX] of [
+        ['A', dualSimState.simA, -1.5], ['B', dualSimState.simB, 1.5]
+      ]) {
+        const centroid = state.diag.centroid;
+        const trail = this.trails[modelKey];
+        trail.points.push(new THREE.Vector3(centroid[0]+offsetX, centroid[1], centroid[2]+0.04));
+        if (trail.points.length > 1800) trail.points.shift();
+        const oldGeometry = trail.line.geometry;
+        trail.line.geometry = new THREE.BufferGeometry().setFromPoints(trail.points);
+        oldGeometry.dispose();
       }
     }
 
-    // 5. Update Checkpoint Overlay Position
-    if (refPos) {
-      this.checkpointGroup.position.set(refPos[0], refPos[1], refPos[2]);
+    const refPosB = dualSimState.simB.diag.centroid || [0, 0, 0];
+    const refPosB_World = [refPosB[0] + 1.5, refPosB[1], refPosB[2]];
+    const payloadCore = dualSimState.simB.diag.corePosition || refPosB;
+    this.comMarker.position.set(payloadCore[0]+1.5, payloadCore[1], payloadCore[2]);
+
+    const contactSet = new Set(dualSimState.simB.diag.groundContactNodes || []);
+    for (let i = 0; i < this.contactMarkers.length; i++) {
+      const marker = this.contactMarkers[i];
+      marker.visible = contactSet.has(i);
+      if (marker.visible) {
+        const position = dualSimState.simB.q[i];
+        marker.position.set(position[0]+1.5, position[1], position[2]);
+      }
     }
 
-    // 6. Update Velocity Vector Arrow
-    if (currentDiag.velocityVector && refPos) {
-      const [vx, vy, vz] = currentDiag.velocityVector;
+    const supportFace = dualSimState.simB.diag.supportFace || [];
+    if (supportFace.length === 3) {
+      const points = supportFace.map(node => {
+        const position = dualSimState.simB.q[node];
+        return new THREE.Vector3(position[0]+1.5, position[1], position[2]+0.006);
+      });
+      const oldGeometry = this.supportFaceMesh.geometry;
+      this.supportFaceMesh.geometry = new THREE.BufferGeometry().setFromPoints(points);
+      this.supportFaceMesh.geometry.setIndex([0, 1, 2]);
+      this.supportFaceMesh.geometry.computeVertexNormals();
+      oldGeometry.dispose();
+      this.supportFaceMesh.visible = true;
+    } else {
+      this.supportFaceMesh.visible = false;
+    }
+
+    const targetEdge = dualSimState.simB.diag.targetEdge || [];
+    if (targetEdge.length === 2) {
+      const points = targetEdge.map(node => {
+        const position = dualSimState.simB.q[node];
+        return new THREE.Vector3(position[0]+1.5, position[1], position[2]+0.018);
+      });
+      const oldGeometry = this.tippingEdgeLine.geometry;
+      this.tippingEdgeLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+      oldGeometry.dispose();
+      this.tippingEdgeLine.visible = true;
+    } else {
+      this.tippingEdgeLine.visible = false;
+    }
+
+    const stateStr = `${dualSimState.simB.diag.obstaclePhase || dualSimState.simB.diag.state || 'ROLLING'} · ${dualSimState.simB.diag.activeObstacleId || 'course'}`;
+    if (this.stateSprite && stateStr !== this.stateSpriteMessage) {
+      this.scene.remove(this.stateSprite);
+      this.stateSprite.material.map.dispose();
+      this.stateSprite.material.dispose();
+      this.stateSprite = this.createTextSprite(stateStr);
+      this.stateSpriteMessage = stateStr;
+      this.scene.add(this.stateSprite);
+    }
+    this.stateSprite.position.set(refPosB_World[0], refPosB_World[1], refPosB_World[2] + 1.2);
+
+    if (this.checkpointGroup) {
+      this.checkpointGroup.position.set(refPosB_World[0], refPosB_World[1], refPosB_World[2]);
+    }
+
+    if (dualSimState.simB.diag.velocityVector) {
+      const [vx, vy, vz] = dualSimState.simB.diag.velocityVector;
       const speed = Math.sqrt(vx*vx + vy*vy + vz*vz);
-      this.velArrow.position.set(refPos[0], refPos[1], refPos[2]);
+      this.velArrow.position.set(refPosB_World[0], refPosB_World[1], refPosB_World[2]);
       if (speed > 0.05) {
         this.velArrow.setDirection(new THREE.Vector3(vx/speed, vy/speed, vz/speed));
         this.velArrow.setLength(Math.min(1.5, speed * 0.8), 0.15, 0.08);
@@ -461,36 +565,37 @@ export class Visualizer {
       }
     }
 
-    // 7. Update Trajectory Trail
-    if (refPos) {
-      const curPos = new THREE.Vector3(refPos[0], refPos[1], refPos[2]);
-      if (this.trailPoints.length === 0 || curPos.distanceTo(this.trailPoints[this.trailPoints.length - 1]) > 0.20) {
-        this.trailPoints.push(curPos);
-        if (this.trailPoints.length > 500) this.trailPoints.shift();
-
-        const positions = new Float32Array(this.trailPoints.length * 3);
-        for (let i = 0; i < this.trailPoints.length; i++) {
-          positions[i*3]     = this.trailPoints[i].x;
-          positions[i*3 + 1] = this.trailPoints[i].y;
-          positions[i*3 + 2] = this.trailPoints[i].z;
-        }
-        this.trailLine.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.trailLine.geometry.attributes.position.needsUpdate = true;
+    if (dualSimState.simB.diag.desiredDirection) {
+      const [dx, dy, dz] = dualSimState.simB.diag.desiredDirection;
+      const magnitude = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      this.controlArrow.position.set(refPosB_World[0], refPosB_World[1], refPosB_World[2] + 0.12);
+      if (magnitude > 1e-6) {
+        this.controlArrow.setDirection(new THREE.Vector3(dx/magnitude, dy/magnitude, dz/magnitude));
+        this.controlArrow.setLength(1.0, 0.18, 0.09);
+        this.controlArrow.visible = true;
+      } else {
+        this.controlArrow.visible = false;
       }
     }
 
-    // 8. Update Camera Controls & Chase Tracking
-    if (refPos) {
-      if (this.options.cameraMode === 'chase') {
-        this.controls.target.set(refPos[0], refPos[1], refPos[2]);
-        this.camera.position.set(refPos[0] - 2.8, refPos[1] - 4.5, refPos[2] + 2.5);
-      } else if (this.options.cameraMode === 'top') {
-        this.controls.target.set(refPos[0], refPos[1], 0);
-        this.camera.position.set(refPos[0], refPos[1], 15);
-      } else if (this.options.cameraMode === 'side') {
-        this.controls.target.set(refPos[0], refPos[1], refPos[2]);
-        this.camera.position.set(refPos[0] + 10, refPos[1], refPos[2]);
-      }
+    const predictedPath = dualSimState.simB.diag.predictedPath || [];
+    if (predictedPath.length >= 2) {
+      const points = predictedPath.map(point => new THREE.Vector3(point[0]+1.5, point[1], point[2]+0.08));
+      const oldGeometry = this.predictionLine.geometry;
+      this.predictionLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+      oldGeometry.dispose();
+      this.predictionLine.computeLineDistances();
+      this.predictionLine.visible = true;
+    } else {
+      this.predictionLine.visible = false;
+    }
+
+    if (this.options.cameraMode === 'chase') {
+      const cx = (dualSimState.simA.diag.centroid[0] - 1.5 + refPosB_World[0]) / 2.0;
+      const cy = (dualSimState.simA.diag.centroid[1] + refPosB_World[1]) / 2.0;
+      const cz = (dualSimState.simA.diag.centroid[2] + refPosB_World[2]) / 2.0;
+      this.controls.target.set(cx, cy, cz);
+      this.camera.position.set(cx - 3.5, cy - 6.5, cz + 3.0);
     }
 
     this.controls.update();

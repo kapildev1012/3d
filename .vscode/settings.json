@@ -1,0 +1,5 @@
+{
+    "code-runner.executorMapByFileExtension": {
+        ".m": "matlab -batch \"cd('%dir%'); level10_payload_core_gforce('ShowFigure', false);\""
+    }
+}
