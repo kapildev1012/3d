@@ -22,6 +22,9 @@ export const MONITORING_DEFAULTS = Object.freeze({
   rawLogging: true,
   maxRawSamples: 50_000,
   chartSamplePeriod: 0.05,
+  // Rolling cap on chart-history samples (0.05 s apart). A 5000 s expedition
+  // would otherwise retain ~100k samples, each cable series a 24-wide array.
+  maxChartSamples: 4000,
   chartWindowSeconds: 60,
   goalThreshold: 0.50,
   contactForceThreshold: 0.25,
@@ -38,6 +41,13 @@ export const MONITORING_DEFAULTS = Object.freeze({
   maximumNodeSeparationRatio: 2.6,
   collapseRadiusRatio: 0.22
 });
+
+/** Central-settings merge: file/config overrides win over built-in defaults.
+ *  Returns a fresh mutable copy so runtime sliders can retune thresholds;
+ *  MONITORING_DEFAULTS itself stays frozen and untouched. */
+export function mergeMonitoringSettings(overrides = {}) {
+  return { ...MONITORING_DEFAULTS, ...(overrides || {}) };
+}
 
 function normalizeQuaternion(quaternion) {
   const length = Math.hypot(...quaternion);
@@ -219,6 +229,7 @@ export class RealtimeMonitor {
     };
     this.contactEvents = [];
     this.activeContactEvents = new Map();
+    this.peaks = { cableForce: 0, cableStrainPercent: 0, formationError: 0, contactForce: 0 };
     this.nextChartSample = 0;
     this.goalReached = false;
     this.goalResult = null;
@@ -290,6 +301,14 @@ export class RealtimeMonitor {
     const maximumCableForce = Math.max(0, ...cables.map(cable => cable.force));
     const averageCableForce = cables.reduce((sum, cable) => sum+cable.force, 0)/Math.max(1, cables.length);
     const maximumCableStrain = Math.max(0, ...cables.map(cable => cable.strainPercent));
+    this.peaks.cableForce = Math.max(this.peaks.cableForce, maximumCableForce);
+    this.peaks.cableStrainPercent = Math.max(this.peaks.cableStrainPercent, maximumCableStrain);
+    if (Number.isFinite(formationError)) {
+      this.peaks.formationError = Math.max(this.peaks.formationError, formationError);
+    }
+    for (const contact of activeContacts) {
+      this.peaks.contactForce = Math.max(this.peaks.contactForce, contact.normalForce || 0);
+    }
     const slackCableCount = cables.filter(cable => cable.slack).length;
     const overloadedCableCount = cables.filter(cable => cable.overloaded).length;
     const warnings = [];
@@ -312,6 +331,9 @@ export class RealtimeMonitor {
     const stabilityLevel = collapsed || deformed ? 'red'
       : formationError >= this.settings.formationStableThreshold ? 'yellow' : 'green';
     const speed = Math.hypot(...velocity);
+    // Live gravity magnitude [m/s²] so telemetry, HUD and charts stay
+    // reactive when the gravity selector retunes cfg.gravity mid-run.
+    const gravityMagnitude = Math.abs(this.config.gravity?.[2] ?? 9.81);
     const result = {
       time,
       start: this.start.slice(),
@@ -320,6 +342,9 @@ export class RealtimeMonitor {
       goalError,
       remainingX,
       remainingY,
+      gravity: gravityMagnitude,
+      weightForce: (12*(this.config.nodeMass ?? 0.2)
+        +(this.config.coreMass ?? 1.6))*gravityMagnitude,
       goalThreshold: this.settings.goalThreshold,
       goalReached: this.goalReached,
       goalResult: this.goalResult ? { ...this.goalResult } : null,
@@ -332,6 +357,10 @@ export class RealtimeMonitor {
       maximumCableForce,
       averageCableForce,
       maximumCableStrain,
+      peakCableForce: this.peaks.cableForce,
+      peakCableStrainPercent: this.peaks.cableStrainPercent,
+      peakFormationError: this.peaks.formationError,
+      peakContactForce: this.peaks.contactForce,
       slackCableCount,
       overloadedCableCount,
       contacts: activeContacts.map(contact => ({ ...contact })),
@@ -356,6 +385,11 @@ export class RealtimeMonitor {
     };
     if (this.settings.rawLogging && this.records.length < this.settings.maxRawSamples) this.records.push(completeRecord);
     if (time+1e-12 >= this.nextChartSample) {
+      // Rolling cap: charts read only the most recent window, so older samples
+      // are dropped instead of growing without bound across a 5000 s run.
+      if (this.history.t.length >= this.settings.maxChartSamples) {
+        for (const series of Object.values(this.history)) series.shift();
+      }
       this.history.t.push(time);
       this.history.goalError.push(goalError);
       this.history.formationError.push(formationError);
@@ -433,6 +467,7 @@ export class RealtimeMonitor {
       start: this.start,
       goal: this.goal,
       goalResult: this.goalResult,
+      peaks: this.peaks,
       contactEvents: this.contactEventRecords(),
       samples: this.records
     });

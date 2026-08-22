@@ -1,0 +1,31 @@
+{
+  "$comment": "Central settings file for the 3D tensegrity mission monitor. Every threshold below overrides the built-in defaults in js/monitoringSystem.js (MONITORING_DEFAULTS). Edit and reload the page; values are merged at startup. Delete any key to fall back to its default.",
+  "monitoring": {
+    "enabled": true,
+    "rawLogging": true,
+    "maxRawSamples": 50000,
+
+    "chartSamplePeriod": 0.05,
+    "chartWindowSeconds": 60,
+    "chartUpdateSeconds": 0,
+
+    "goalThreshold": 0.50,
+    "contactForceThreshold": 0.25,
+
+    "formationStableThreshold": 0.080,
+    "formationWarningThreshold": 0.180,
+    "formationCollapseThreshold": 0.350,
+
+    "rodLengthWarning": 0.005,
+    "penetrationWarning": 0.002,
+
+    "cableModerateStrainPercent": 10,
+    "cableHighStrainPercent": 25,
+    "cableMaximumStrainPercent": 40,
+    "cableOverloadForce": 720,
+    "slackForceThreshold": 0.25,
+
+    "maximumNodeSeparationRatio": 2.6,
+    "collapseRadiusRatio": 0.22
+  }
+}

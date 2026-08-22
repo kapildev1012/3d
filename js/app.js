@@ -2,10 +2,26 @@
  * APP.JS - Main Coordinator for 6-Bar Tensegrity Icosahedron Rover Simulator
  */
 
-import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer, BenchmarkEngine } from './simEngine.js?v=20260821-modela1';
-import { relaxedCableTension } from './driveControllers.js?v=20260821-forward1';
-import { Visualizer } from './visualizer.js?v=20260821-modela1';
-import { AdaptiveRouteLearner } from './adaptiveLearning.js?v=20260821-learning1';
+import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer, BenchmarkEngine } from './simEngine.js?v=20260822-grip1';
+import { relaxedCableTension } from './driveControllers.js?v=20260822-grip1';
+import { Visualizer } from './visualizer.js?v=20260822-grip1';
+import { AdaptiveRouteLearner, LEVEL14_LEARNING_DEFAULTS } from './adaptiveLearning.js?v=20260822-grip1';
+import {
+  bothModelsReachedGoals,
+  canStartNextTrainingAttempt,
+  currentTrainingAttemptNumber
+} from './trainingCycle.js?v=20260822-grip1';
+import {
+  clearRecords,
+  formatRecordCell,
+  formatSnapshotStatus,
+  getExperimentSnapshot,
+  loadRecords,
+  recordRun,
+  saveExperimentSnapshot,
+  saveRecords,
+  summarizeForExperiment
+} from './experimentRecords.js?v=20260822-grip1';
 
 const Chart = window.Chart;
 
@@ -44,15 +60,19 @@ const EXPERIMENT_NAMES = [
   "Level 5: Eroded Mars Crater Escape",
   "Level 6: Sandy Mars Slope Uphill Roll (18°)",
   "Level 7: Irregular Mars Mountain Landscape",
-  "Level 8: Rough-Sand Rolling Endurance",
-  "Level 9: Rocky Non-Bounce Settling Recovery",
-  "Level 10: Learned Mars Multi-Obstacle Mission"
+  "Level 8: Mixed-Size Boulder Scatter",
+  "Level 9: Mars Marsh Wetlands",
+  "Level 10: Learned Mars A-vs-B Mission",
+  "Level 11: Uneven Rubble Field",
+  "Level 12: Mars Bog & Boulder Gauntlet",
+  "Level 13: Extreme Mars Composite",
+  "Level 14: 1km² Open-World Mars Expedition"
 ];
 
-const MARS_ROUGHNESS_BY_LEVEL = [0, 0.035, 0.05, 0.07, 0.09, 0.075, 0.06, 0.10, 0.10, 0.10, 0.06];
+const MARS_ROUGHNESS_BY_LEVEL = [0, 0.035, 0.05, 0.07, 0.09, 0.075, 0.06, 0.10, 0.10, 0.06, 0.06, 0.14, 0.11, 0.15, 0.18];
 
 class App {
-  constructor() {
+  constructor(centralSettings = {}) {
     this.simSpeed = 1.0;
     this.isPlaying = true;
     this.isGeometryCheckpointMode = false; // Start in active Locomotion Simulation Mode!
@@ -62,6 +82,7 @@ class App {
     this.learningRestartAt = null;
     this.learningStorageKey = 'tensegrity-route-learning-v1';
     this.lastPersistedLearningRevision = -1;
+    this.centralSettings = centralSettings || {};
 
     this.initSimulation();
     this.initVisualizer();
@@ -69,10 +90,31 @@ class App {
     this.initMonitoringControls();
     this.bindEvents();
 
+    // Graph refresh cadence in physics steps. A non-positive
+    // chartUpdateSeconds means true real-time: redraw on every rendered frame.
+    const chartUpdateSeconds = Number.isFinite(this.cfg.monitoring?.chartUpdateSeconds)
+      ? this.cfg.monitoring.chartUpdateSeconds : 0;
+    this.chartUpdateIntervalSteps = chartUpdateSeconds > 0
+      ? Math.max(1, Math.round(chartUpdateSeconds/this.cfg.dt))
+      : 1;
+
     // Start rendering immediately. The controlled A-vs-B table is populated
-    // from the live solver; no synthetic or blocking startup benchmark.
-    this.benchmarkData = [];
+    // from the live solver; the benchmark matrix hydrates from persisted
+    // per-experiment snapshots instead of starting blank every refresh.
+    this.recordsStore = loadRecords(window.localStorage);
+    const storedBenchmark = this.recordsStore?.snapshots?.benchmark?.results;
+    this.benchmarkData = Array.isArray(storedBenchmark) ? storedBenchmark : [];
+    this.lastSnapshotFlush = performance.now();
+    // Flush the latest live metrics when the tab is hidden or closed so a
+    // refresh never loses the current experiment's data.
+    window.addEventListener('pagehide', () => this.captureLiveSnapshots());
+    window.addEventListener('beforeunload', () => this.captureLiveSnapshots());
+    this.recordedTokens = new WeakMap();
+    this.updateRecordsSummary();
     this.updateMetricsTable();
+    // Sync the top-bar preset dropdown, sidebar slider and readout with the
+    // configured starting gravity (Earth by default).
+    this.setGravity(Math.abs(this.cfg.gravity?.[2] ?? 9.81), { source: 'init' });
     requestAnimationFrame(t => this.animationLoop(t));
   }
 
@@ -83,7 +125,8 @@ class App {
       actuationMode: 'roll_forward',
       abCourseEnabled: true,
       targetDestination: [0, 60],
-      targetGoalY: 60
+      targetGoalY: 60,
+      monitoring: { ...(this.centralSettings.monitoring || {}) }
     }).applyLevel10PerformanceProfile();
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
@@ -307,6 +350,28 @@ class App {
         plugins: { legend: { labels: { color: '#e2e8f0' } } }
       }
     });
+    this.chartCableBars = new Chart(document.getElementById('chart-cable-bars').getContext('2d'), {
+      type: 'bar',
+      data: { datasets: [
+        {
+          label: 'Tension [N]', data: [], backgroundColor: [], borderWidth: 0,
+          barPercentage: 1.0, categoryPercentage: 0.92
+        },
+        {
+          type: 'line', label: 'Overload limit [N]', data: [],
+          borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5,
+          pointRadius: 0, fill: false
+        }
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
+        scales: {
+          x: { title: { display: true, text: 'Cable ID', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxRotation: 90, autoSkip: false } },
+          y: { title: { display: true, text: 'Tension force [N]', color: '#94a3b8' }, beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+        },
+        plugins: { legend: { labels: { color: '#e2e8f0' } } }
+      }
+    });
   }
 
   initMonitoringControls() {
@@ -315,6 +380,13 @@ class App {
       cableSelect.innerHTML = this.rover.outerStrings.map((_, index) =>
         `<option value="${index}">C${String(index+1).padStart(2, '0')}</option>`).join('');
       cableSelect.value = String(this.selectedCableIndex);
+    }
+    const thresholdInput = document.getElementById('input-goal-threshold');
+    if (thresholdInput) {
+      const threshold = this.cfg.monitoring.goalThreshold;
+      thresholdInput.value = String(threshold);
+      const value = document.getElementById('val-goal-threshold');
+      if (value) value.textContent = `${threshold.toFixed(2)} m`;
     }
   }
 
@@ -338,12 +410,62 @@ class App {
 
   runFullBenchmark() {
     this.benchmarkData = BenchmarkEngine.runAllExperiments(this.cfg);
+    // Persist the full 14-experiment benchmark so the matrix keeps it across
+    // refreshes instead of reverting to NOT RUN.
+    if (this.recordsStore) {
+      this.recordsStore.snapshots = this.recordsStore.snapshots || {};
+      this.recordsStore.snapshots.benchmark = {
+        results: this.benchmarkData,
+        updatedAt: new Date().toISOString()
+      };
+      saveRecords(window.localStorage, this.recordsStore);
+    }
     this.updateMetricsTable();
+  }
+
+  /** Latest live Model B metrics of the active experiment, snapshot-ready. */
+  buildSnapshotPayload() {
+    const metrics = this.simB?.metrics;
+    if (!metrics) return null;
+    return {
+      terrainLevel: this.cfg.terrainLevel,
+      gravity: Math.abs(this.cfg.gravity?.[2] ?? 9.81),
+      controllerShort: this.constructor.controllerShortLabel(
+        this.cfg.controllerMode || 'natural_support_face'),
+      modelLabel: 'Model B',
+      distance: Number.isFinite(metrics.distanceTraveled) ? metrics.distanceTraveled : 0,
+      elapsed: Number.isFinite(metrics.timeElapsed) ? metrics.timeElapsed : 0,
+      avgVelocity: Number.isFinite(metrics.avgVelocity) ? metrics.avgVelocity : 0,
+      maxG: Number.isFinite(metrics.payloadAccelMax) ? metrics.payloadAccelMax : null,
+      maxTension: Number.isFinite(metrics.maxCableTension) ? metrics.maxCableTension : null,
+      deformation: Number.isFinite(metrics.shapeDeformationMax) ? metrics.shapeDeformationMax : null,
+      obstacles: this.terrain.course
+        ? this.terrain.course.obstacles.length
+        : (Number.isFinite(this.terrain.expeditionObstacles?.length)
+          ? this.terrain.expeditionObstacles.length : null),
+      outcome: metrics.runOutcome || 'running',
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  /** Write the current experiment's live data into the persistent store. */
+  captureLiveSnapshots() {
+    if (!this.recordsStore || !this.simB) return;
+    const payload = this.buildSnapshotPayload();
+    if (!payload) return;
+    saveExperimentSnapshot(this.recordsStore, this.cfg.experimentId, payload);
+    saveRecords(window.localStorage, this.recordsStore);
   }
 
   handleAdaptiveLearningCycle(now) {
     this.persistRouteLearning();
-    if (!this.autoLearningEnabled || this.cfg.experimentId !== 10 || !this.simB.metrics.runTerminal) {
+    const bothModelsAtGoal = canStartNextTrainingAttempt({
+      autoLearningEnabled: this.autoLearningEnabled,
+      experimentId: this.cfg.experimentId,
+      metricsA: this.simA.metrics,
+      metricsB: this.simB.metrics
+    });
+    if (!bothModelsAtGoal) {
       this.learningRestartAt = null;
       return;
     }
@@ -380,6 +502,14 @@ class App {
     }
 
     this.handleAdaptiveLearningCycle(now);
+    this.captureRunOutcomes();
+
+    // Persist the live experiment's metrics every few seconds so a refresh
+    // keeps all previous terrain data in the metrics matrix.
+    if (now-this.lastSnapshotFlush >= 5000) {
+      this.lastSnapshotFlush = now;
+      this.captureLiveSnapshots();
+    }
 
     // Render 3D Scene Dual
     this.vis.updateDual({
@@ -391,12 +521,107 @@ class App {
     this.updateCharts();
   }
 
+  static controllerShortLabel(mode) {
+    const map = {
+      natural_support_face: 'Natural', cpg: 'CPG',
+      lqr: 'LQR', lqr_payload: 'LQR+P',
+      ilqr: 'iLQR', ilqr_minimax: 'MM-iLQR', ilqr_minimax_penalty: 'MM-iLQR+P',
+      qp_mpc: 'MPC', qp_mpc_payload: 'MPC+P', neural: 'NN',
+      riccati_lqr: 'Ric-LQR', ilqr_true: 'iLQR-T',
+      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC'
+    };
+    return map[mode] || mode || '—';
+  }
+
+  /** Persist every terminal run (win/loss) of either model into the
+   *  all-time records store. Deduplicated per attempt via outcome tokens. */
+  captureRunOutcomes() {
+    if (!this.recordsStore) return;
+    const capture = (sim, model) => {
+      if (!sim?.metrics) return;
+      const m = sim.metrics;
+      const outcome = m.runOutcome;
+      if (outcome !== 'win' && outcome !== 'loss') return;
+      const token = `${outcome}|${m.completionTime}|${(m.distanceTraveled || 0).toFixed(3)}|`+
+        `${(m.avgVelocity || 0).toFixed(4)}|${this.routeLearner?.runCount || 0}`;
+      if (this.recordedTokens.get(sim) === token) return;
+      this.recordedTokens.set(sim, token);
+      const isAdaptive = model === 'B';
+      const controllerMode = isAdaptive
+        ? (this.cfg.controllerMode || 'natural_support_face') : 'fixed_baseline';
+      const { newBest, newWorst } = recordRun(this.recordsStore, {
+        expId: this.cfg.experimentId,
+        terrainLevel: this.cfg.terrainLevel,
+        model,
+        modelLabel: isAdaptive ? 'Model B' : 'Model A',
+        controllerMode,
+        controllerShort: this.constructor.controllerShortLabel(controllerMode),
+        outcome,
+        completionTime: m.completionTime,
+        distanceTraveled: m.distanceTraveled || 0,
+        avgVelocity: m.avgVelocity || 0,
+        maxCableTension: Number.isFinite(m.maxCableTension) ? m.maxCableTension : null,
+        payloadAccelMax: Number.isFinite(m.payloadAccelMax) ? m.payloadAccelMax : null,
+        shapeDeformationMax: Number.isFinite(m.shapeDeformationMax) ? m.shapeDeformationMax : null,
+        energyCost: Number.isFinite(m.energyCost) ? m.energyCost : null
+      });
+      saveRecords(window.localStorage, this.recordsStore);
+      this.updateRecordsSummary();
+      if (newBest || newWorst) this.updateMetricsTable();
+    };
+    capture(this.simA, 'A');
+    capture(this.simB, 'B');
+  }
+
+  updateRecordsSummary() {
+    const element = document.getElementById('records-total');
+    if (!element) return;
+    const total = this.recordsStore?.entries.length || 0;
+    element.textContent = `${total} all-time run${total === 1 ? '' : 's'} recorded`;
+  }
+
+  // Single entry point for every gravity change (top-bar preset, sidebar
+  // slider). Writes cfg.gravity live, keeps the slider, readout, and preset
+  // dropdown in sync, and refreshes telemetry immediately.
+  setGravity(valueG, { source } = {}) {
+    const val = Math.max(0, Math.min(20, valueG));
+    this.cfg.gravity = [0.0, 0.0, -val];
+    const slider = document.getElementById('slider-gravity');
+    const readout = document.getElementById('val-gravity');
+    if (slider && source !== 'slider') {
+      slider.value = String(val);
+    }
+    let label = `${val.toFixed(2)} m/s²`;
+    if (Math.abs(val-9.81) < 0.1) label = "9.81 m/s² (Earth)";
+    else if (Math.abs(val-3.721) < 0.1) label = "3.721 m/s² (Mars)";
+    else if (Math.abs(val-1.625) < 0.1) label = "1.625 m/s² (Moon)";
+    else if (val === 0) label = "0.00 m/s² (Zero-G)";
+    else label = `${label} (Custom)`;
+    if (readout) readout.textContent = label;
+
+    // Reflect the nearest matching preset in the top bar; anything else is
+    // Custom.
+    const presetSelect = document.getElementById('select-gravity-preset');
+    if (presetSelect && source !== 'preset') {
+      const match = Math.abs(val-9.81) < 0.1 ? 'earth'
+        : Math.abs(val-3.721) < 0.1 ? 'mars'
+        : Math.abs(val-1.625) < 0.1 ? 'moon' : 'custom';
+      presetSelect.value = match;
+    }
+
+    // Reactive telemetry: metrics table immediately; the monitoring charts
+    // re-sample every animation frame in tick(), so they pick up the new
+    // gravity on their own.
+    this.updateMetricsTable();
+  }
+
   updateHUD() {
     const timeElem = document.getElementById('sim-time');
     if (timeElem) {
-      const attempt = this.routeLearner?.runCount+1 || 1;
+      const attempt = currentTrainingAttemptNumber(this.routeLearner?.runCount, this.simB.metrics);
       const limit = this.terrain.course ? (this.cfg.missionDeadlineSeconds || this.cfg.T_end) : this.cfg.T_end;
-      timeElem.textContent = `${this.simB.t.toFixed(2)} s / ${limit} s${this.terrain.course ? ` · try ${attempt}` : ''}`;
+      const attemptTime = Math.max(this.simA.t, this.simB.t);
+      timeElem.textContent = `${attemptTime.toFixed(2)} s / ${limit} s${this.terrain.course ? ` · try ${attempt}` : ''}`;
     }
 
     const diagA = this.simA.currentDiag;
@@ -450,13 +675,25 @@ class App {
     setText('hud-b-obstacles', `${summaryB.over} over / ${summaryB.around} around`);
     setText('hud-b-bypass', `${summaryB.bypassViolations || 0}`);
     setText('course-current-obstacle', diagB.activeObstacleId || 'none');
-    setText('course-checkpoints', `${summaryB.checkpointsReached || 0} / ${summaryB.total || 10}`);
+    const expedition = mB.expeditionWaypoints?.total > 0 ? mB.expeditionWaypoints : null;
+    setText('course-checkpoints', expedition
+      ? `${expedition.reached} / ${expedition.total} waypoints`
+      : `${summaryB.checkpointsReached || 0} / ${summaryB.total || 10}`);
     setText('course-phase', diagB.obstaclePhase || 'cruise');
     const courseY = diagB.centroid?.[1] || 0;
-    setText('course-progress', courseY < 10
-      ? `approach y=${courseY.toFixed(2)} / 10.00 m`
-      : `${Math.max(0, Math.min(50, courseY-10)).toFixed(1)} / 50.0 m`);
+    const startLineY = this.cfg.courseStartY || 10;
+    const goalLineY = this.cfg.courseGoalY || this.cfg.targetGoalY;
+    const measuredLength = goalLineY-startLineY;
+    setText('course-progress', courseY < startLineY
+      ? `approach y=${courseY.toFixed(2)} / ${startLineY.toFixed(2)} m`
+      : `${Math.max(0, Math.min(measuredLength, courseY-startLineY)).toFixed(1)} / ${measuredLength.toFixed(1)} m`);
     this.updateMonitoringHUD(diagB.monitoring);
+    // Live gravity telemetry: reacts instantly to the top-bar preset or the
+    // sidebar slider, on every terrain level.
+    const gravityNow = Number.isFinite(diagB.monitoring?.gravity)
+      ? diagB.monitoring.gravity : Math.abs(this.cfg.gravity?.[2] ?? 9.81);
+    setText('monitor-gravity',
+      `g = ${gravityNow.toFixed(3)} m/s² · rover weight ≈ ${(diagB.monitoring?.weightForce ?? 0).toFixed(1)} N`);
     this.updateLearningHUD();
     this.updateABComparisonTable();
   }
@@ -475,6 +712,7 @@ class App {
     setText('monitor-node-separation', `${monitoring.maximumNodeSeparation.toFixed(3)} m`);
     setText('monitor-clearance', `${(monitoring.terrainClearance*1000).toFixed(3)} mm`);
     setText('monitor-force-summary', `${monitoring.maximumCableForce.toFixed(1)} / ${monitoring.averageCableForce.toFixed(1)} N`);
+    setText('monitor-run-peaks', `${(monitoring.peakCableForce ?? 0).toFixed(1)} N · ${(monitoring.peakCableStrainPercent ?? 0).toFixed(1)}%`);
     setText('monitor-max-strain', `${monitoring.maximumCableStrain.toFixed(2)}%`);
     setText('monitor-cable-counts', `${monitoring.slackCableCount} / ${monitoring.overloadedCableCount}`);
     setText('monitor-grounded', monitoring.grounded ? 'GROUNDED' : 'AIRBORNE');
@@ -497,14 +735,19 @@ class App {
     if (goalResult) {
       const metrics = this.simB.metrics;
       if (metrics.runOutcome === 'win') {
-        goalResult.textContent = `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · learner keeps the faster route`;
+        const bothModelsAtGoal = bothModelsReachedGoals(this.simA.metrics, metrics);
+        goalResult.textContent = bothModelsAtGoal
+          ? `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · both models at goal · next training starts soon`
+          : `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · waiting for Model A before next training`;
         goalResult.className = 'mt-2 rounded bg-emerald-950/60 p-2 text-emerald-300 font-bold';
       } else if (metrics.runOutcome === 'loss') {
         const remaining = Math.max(0, this.cfg.courseGoalY-(this.simB.currentDiag.centroid?.[1] || 0));
-        goalResult.textContent = `LOSS · 120 s exceeded · ${remaining.toFixed(2)} m remaining · gradient update saved for next try`;
+        const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
+        goalResult.textContent = `LOSS · deadline (${deadline.toFixed(0)} s) exceeded · ${remaining.toFixed(2)} m remaining · auto training waits until both models reach their goals`;
         goalResult.className = 'mt-2 rounded bg-rose-950/60 p-2 text-rose-300 font-bold';
       } else {
-        goalResult.textContent = `Attempt ${this.routeLearner?.runCount+1 || 1} running · reach Goal B before 120 s`;
+        const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
+        goalResult.textContent = `Attempt ${this.routeLearner?.runCount+1 || 1} running · reach Goal B before ${deadline.toFixed(0)} s`;
         goalResult.className = 'mt-2 rounded bg-slate-900 p-2 text-slate-400';
       }
     }
@@ -532,9 +775,12 @@ class App {
     }
     const contactList = document.getElementById('monitor-contact-list');
     if (contactList) {
+      const activeEvents = this.simB.monitor?.activeContactEvents;
       contactList.innerHTML = monitoring.contacts.length ? monitoring.contacts.map(contact => {
         const friction = Math.hypot(...(contact.frictionForce || [0, 0, 0]));
-        return `<div class="flex justify-between gap-2"><span class="text-orange-300">${contact.id} · ${contact.objectId}</span><span>${contact.normalForce.toFixed(1)} N normal · ${friction.toFixed(1)} N friction</span></div>`;
+        const event = activeEvents?.get(`${contact.kind || 'node'}:${contact.id}`);
+        const duration = event ? ` · ${(monitoring.time-event.startTime).toFixed(2)} s` : '';
+        return `<div class="flex justify-between gap-2"><span class="text-orange-300">${contact.id} · ${contact.objectId}${duration}</span><span>${contact.normalForce.toFixed(1)} N normal · ${friction.toFixed(1)} N friction</span></div>`;
       }).join('') : 'No active contacts';
     }
   }
@@ -548,7 +794,7 @@ class App {
     };
     const command = learning.currentCommand || this.simB.learningCommand || {};
     const lastRun = learning.lastRun;
-    setText('learning-attempt', String(learning.runCount+1));
+    setText('learning-attempt', String(currentTrainingAttemptNumber(learning.runCount, this.simB.metrics)));
     setText('learning-record', `${learning.wins} W / ${learning.losses} L`);
     setText('learning-best', learning.bestTime === null ? 'No completed win yet' : `${learning.bestTime.toFixed(2)} s`);
     setText('learning-segment', `${command.segmentLabel || 'S01'} · waypoint x=${(command.waypointX || 0).toFixed(2)} m`);
@@ -591,26 +837,32 @@ class App {
   }
 
   updateCharts() {
-    if (this.simB.stepCount - (this.lastChartStep || 0) >= 250) {
+    if (this.simB.stepCount - (this.lastChartStep || 0) >= this.chartUpdateIntervalSteps) {
       this.lastChartStep = this.simB.stepCount;
       const hist = this.simB.history;
       // Show a calm 20-second window instead of redrawing the full, noisy
       // physics history. History samples arrive every 20 ms.
       const start = Math.max(0, hist.t.length-1000);
       const labels = hist.t.slice(start).map(t => t.toFixed(1));
+      // Slice to the visible window BEFORE smoothing: averaging the full
+      // multi-hundred-thousand-sample expedition history on every redraw is
+      // wasted work when only the last 20 s is displayed.
+      const windowOf = series => series.slice(start);
       this.chartG.data.labels = labels;
-      this.chartG.data.datasets[0].data = movingAverage(hist.centroidAccel, 50).slice(start);
+      this.chartG.data.datasets[0].data = movingAverage(windowOf(hist.centroidAccel), 50);
       this.chartG.update('none');
 
       this.chartV.data.labels = labels;
-      this.chartV.data.datasets[0].data = movingAverage(hist.planarSpeed, 50).slice(start);
-      this.chartV.data.datasets[1].data = movingAverage(hist.deformation, 50).slice(start);
+      this.chartV.data.datasets[0].data = movingAverage(windowOf(hist.planarSpeed), 50);
+      this.chartV.data.datasets[1].data = movingAverage(windowOf(hist.deformation), 50);
       this.chartV.update('none');
 
       this.chartControl.data.labels = labels;
-      this.chartControl.data.datasets[0].data = movingAverage(hist.controlCost, 50).slice(start);
-      this.chartControl.data.datasets[1].data = movingAverage(hist.constraintError, 50).slice(start).map(error => error*1000);
-      this.chartControl.data.datasets[2].data = movingAverage(hist.relaxationFraction, 50).slice(start).map(fraction => fraction*100);
+      this.chartControl.data.datasets[0].data = movingAverage(windowOf(hist.controlCost), 50);
+      this.chartControl.data.datasets[1].data =
+        movingAverage(windowOf(hist.constraintError), 50).map(error => error*1000);
+      this.chartControl.data.datasets[2].data =
+        movingAverage(windowOf(hist.relaxationFraction), 50).map(fraction => fraction*100);
       this.chartControl.update('none');
 
       this.updateMonitoringCharts();
@@ -671,6 +923,22 @@ class App {
     if (deltaLabel) deltaLabel.textContent = `${cableId} · ΔL [m]`;
     const forceLabel = document.getElementById('chart-cable-force-label');
     if (forceLabel) forceLabel.textContent = `${cableId} · tension [N]`;
+
+    // Instantaneous force distribution across every cable (raw values).
+    const stateColors = {
+      slack: '#a855f7', overload: '#ef4444', high: '#f97316',
+      moderate: '#facc15', nominal: '#22c55e'
+    };
+    const liveCables = monitor.latest?.cables || [];
+    if (liveCables.length) {
+      this.chartCableBars.data.labels = liveCables.map(cable => cable.id);
+      this.chartCableBars.data.datasets[0].data = liveCables.map(cable => cable.force);
+      this.chartCableBars.data.datasets[0].backgroundColor =
+        liveCables.map(cable => stateColors[cable.state] || '#22c55e');
+      this.chartCableBars.data.datasets[1].data =
+        new Array(liveCables.length).fill(monitor.settings.cableOverloadForce);
+      this.chartCableBars.update('none');
+    }
   }
 
   updateMetricsTable() {
@@ -680,25 +948,57 @@ class App {
     let html = '';
     const bData = this.benchmarkData || [];
 
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= EXPERIMENT_NAMES.length; i++) {
       const isCurrent = (i === this.cfg.experimentId);
       const bRes = bData[i - 1] || {};
+      // Persisted snapshot keeps the row populated after any refresh, even
+      // when this session never ran the experiment and no benchmark exists.
+      const saved = getExperimentSnapshot(this.recordsStore, i);
 
-      const distance = isCurrent ? this.simB.metrics.distanceTraveled : bRes.distance;
-      const time = isCurrent ? this.simB.metrics.timeElapsed : bRes.time;
-      const avgSpeed = isCurrent ? this.simB.metrics.avgVelocity : bRes.avgVelocity;
-      const maxG = isCurrent ? this.simB.metrics.payloadAccelMax : bRes.maxG;
-      const maxTension = isCurrent ? this.simB.metrics.maxCableTension : bRes.maxTension;
-      const deformation = isCurrent ? this.simB.metrics.shapeDeformationMax : bRes.deformation;
+      const pick = (live, benchmark, snapshotField) => isCurrent
+        ? live
+        : (Number.isFinite(benchmark) ? benchmark
+          : (saved && Number.isFinite(saved[snapshotField]) ? saved[snapshotField] : NaN));
+      const distance = pick(this.simB.metrics.distanceTraveled, bRes.distance, 'distance');
+      const time = pick(this.simB.metrics.timeElapsed, bRes.time, 'elapsed');
+      const avgSpeed = pick(this.simB.metrics.avgVelocity, bRes.avgVelocity, 'avgVelocity');
+      const maxG = pick(this.simB.metrics.payloadAccelMax, bRes.maxG, 'maxG');
+      const maxTension = pick(this.simB.metrics.maxCableTension, bRes.maxTension, 'maxTension');
+      const deformation = pick(this.simB.metrics.shapeDeformationMax, bRes.deformation, 'deformation');
       const obstacles = isCurrent && this.terrain.course
         ? this.terrain.course.obstacles.length
-        : bRes.obstacles;
+        : (Number.isFinite(bRes.obstacles) ? bRes.obstacles
+          : (saved && Number.isFinite(saved.obstacles) ? saved.obstacles : NaN));
       const number = (value, digits, unit = '') => Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—';
 
       const rowClass = isCurrent ? "bg-cyan-950/40 border-b border-cyan-800/80 font-bold" : "border-b border-slate-800 hover:bg-slate-800/40 transition";
-      const badge = isCurrent ? '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 text-[10px]">ACTIVE LIVE</span>' : `<span class="text-slate-500 text-[10px]">${bRes.status || 'NOT RUN'}</span>`;
+      let badge;
+      if (isCurrent) {
+        badge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 text-[10px]">ACTIVE LIVE</span>';
+      } else if (bRes.status) {
+        badge = `<span class="text-slate-500 text-[10px]">${bRes.status}</span>`;
+      } else if (saved) {
+        badge = `<span class="px-2 py-0.5 rounded bg-cyan-900/50 text-cyan-300 border border-cyan-800 text-[10px]">${formatSnapshotStatus(saved)}</span>`;
+      } else {
+        badge = '<span class="text-slate-500 text-[10px]">NOT RUN</span>';
+      }
 
-      html += `<tr class="${rowClass}">
+      const summary = summarizeForExperiment(this.recordsStore, i);
+      const recordTooltip = run => run
+        ? `${run.outcome.toUpperCase()} · t=${Number.isFinite(run.completionTime) ? `${run.completionTime.toFixed(2)}s` : '—'} · ${run.modelLabel} · ${run.controllerShort} · terrain L${run.terrainLevel} · ${new Date(run.timestamp).toLocaleString()}`
+        : '';
+      const snapshotTooltip = saved
+        ? `SAVED · ${saved.captures} captures · last ${saved.outcome?.toUpperCase() || 'RUN'} · `+
+          `peaks: ${saved.maxG?.toFixed?.(1) ?? '—'} G · ${saved.maxTension?.toFixed?.(1) ?? '—'} N · `+
+          `${saved.deformation?.toFixed?.(3) ?? '—'} m · best speed ${saved.bestAvgVelocity?.toFixed?.(2) ?? '—'} m/s · `+
+          `g=${Number.isFinite(saved.gravity) ? saved.gravity.toFixed(3) : '—'} m/s² · `+
+          `updated ${new Date(saved.updatedAt).toLocaleString()}`
+        : '';
+      const bestCell = `<td class="py-2.5 px-3 text-emerald-300 text-[10px]" title="${recordTooltip(summary.best)}">${formatRecordCell(summary.best)}</td>`;
+      const worstCell = `<td class="py-2.5 px-3 text-rose-300/90 text-[10px]" title="${recordTooltip(summary.worst)}">${formatRecordCell(summary.worst)}</td>`;
+      const rowTooltip = saved ? ` title="${snapshotTooltip}"` : '';
+
+      html += `<tr${rowTooltip} class="${rowClass}">
         <td class="py-2.5 px-3 font-semibold text-cyan-300">${EXPERIMENT_NAMES[i - 1]}</td>
         <td class="py-2.5 px-3 text-slate-200">${number(distance, 2, ' m')}</td>
         <td class="py-2.5 px-3 text-slate-300">${number(time, 1, ' s')}</td>
@@ -708,6 +1008,8 @@ class App {
         <td class="py-2.5 px-3 text-slate-300">${number(deformation, 3, ' m')}</td>
         <td class="py-2.5 px-3 text-cyan-400">${Number.isFinite(obstacles) ? obstacles : '—'}</td>
         <td class="py-2.5 px-3">${badge}</td>
+        ${bestCell}
+        ${worstCell}
       </tr>`;
     }
 
@@ -715,14 +1017,31 @@ class App {
   }
 
   loadExperiment(expId) {
+    // Preserve the outgoing experiment's latest live data before the sims
+    // are rebuilt — switching terrains never loses the previous run.
+    this.captureLiveSnapshots();
     this.cfg.experimentId = expId;
-    this.cfg.terrainLevel = Math.min(7, expId);
+    // Levels 1–9 and 11–14 map directly; level 10 uses the A-vs-B course.
+    this.cfg.terrainLevel = (expId === 10) ? 7 : Math.min(14, expId);
     this.cfg.groundRMS = MARS_ROUGHNESS_BY_LEVEL[expId] || 0.04;
     this.cfg.abCourseEnabled = expId === 10;
-    this.cfg.targetGoalY = expId === 10 ? 60 : 25;
+    this.cfg.targetGoalY = expId === 10 ? 60 : (expId === 14 ? 450 : 25);
     this.cfg.targetDestination = [0, this.cfg.targetGoalY];
     if (expId === 10) this.cfg.applyLevel10PerformanceProfile();
-    else this.cfg.applyStandardPerformanceProfile();
+    else {
+      this.cfg.applyStandardPerformanceProfile();
+      if (expId === 14) {
+        this.cfg.T_end = 5000.0; // 900 m of open-world terrain takes time
+        // The expedition crosses the full 1 km² open-world field: the start
+        // line sits at y = -450 m and the goal gate at y = +450 m, both well
+        // inside the rendered [-500, +500]² expanse. The scoring window must
+        // span the whole crossing or the run would "win" at a Level-10 line.
+        this.cfg.courseStartY = -450.0;
+        this.cfg.courseGoalY = 450.0;
+        this.cfg.courseMaxY = 480.0;
+        this.cfg.missionDeadlineSeconds = 5000.0;
+      }
+    }
 
     if (expId === 2) this.cfg.actuationMode = 'roll_backward';
     else this.cfg.actuationMode = 'roll_forward';
@@ -743,6 +1062,24 @@ class App {
     const controlRate = document.getElementById('control-rate-value');
     if (controlRate) controlRate.textContent = `${Math.round(1/this.cfg.controllerDt)} Hz`;
 
+    if (expId === 10 || expId === 14) {
+      this.learningStorageKey = expId === 14 ? 'tensegrity-route-learning-v14' : 'tensegrity-route-learning-v1';
+      this.routeLearner = new AdaptiveRouteLearner(expId === 14 ? {
+        ...LEVEL14_LEARNING_DEFAULTS,
+        courseStartY: this.cfg.courseStartY || 10,
+        courseGoalY: this.cfg.targetGoalY,
+        baseTargetSpeed: this.cfg.targetSpeed
+      } : {
+        deadlineSeconds: this.cfg.missionDeadlineSeconds,
+        courseStartY: this.cfg.courseStartY || 10,
+        courseGoalY: this.cfg.targetGoalY,
+        baseTargetSpeed: this.cfg.targetSpeed,
+        segmentLength: 2.0
+      }, this.loadRouteLearning());
+    } else {
+      this.routeLearner = null;
+    }
+
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
     this.simA = new Simulation(this.cfg, this.rover, this.terrain, 'fixed');
@@ -751,7 +1088,7 @@ class App {
       this.rover,
       this.terrain,
       'adaptive',
-      expId === 10 ? this.routeLearner : null
+      this.routeLearner
     );
     this.accumulatedTime = 0;
     this.lastChartStep = 0;
@@ -916,18 +1253,31 @@ class App {
       downloadText('complete_simulation_log.json', this.simB.monitor.exportJson(), 'application/json;charset=utf-8');
     });
 
+    document.getElementById('btn-clear-records')?.addEventListener('click', () => {
+      if (!this.recordsStore) return;
+      clearRecords(this.recordsStore);
+      saveRecords(window.localStorage, this.recordsStore);
+      this.recordedTokens = new WeakMap();
+      this.updateRecordsSummary();
+      this.updateMetricsTable();
+    });
+
     // Gravity Slider Control
     document.getElementById('slider-gravity').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      this.cfg.gravity = [0.0, 0.0, -val];
-      let label = `${val.toFixed(2)} m/s²`;
-      if (Math.abs(val - 9.81) < 0.1) label = "9.81 m/s² (Earth)";
-      else if (Math.abs(val - 3.71) < 0.1) label = "3.71 m/s² (Mars)";
-      else if (Math.abs(val - 1.62) < 0.1) label = "1.62 m/s² (Moon)";
-      else if (val === 0) label = "0.00 m/s² (Zero-G)";
-      document.getElementById('val-gravity').textContent = label;
+      this.setGravity(parseFloat(e.target.value), { source: 'slider' });
+    });
 
-      this.updateMetricsTable();
+    // Top-bar gravity quick-select: presets write straight into cfg.gravity,
+    // Custom just focuses the sidebar slider for fine tuning.
+    document.getElementById('select-gravity-preset').addEventListener('change', (e) => {
+      const preset = e.target.value;
+      const presets = { earth: 9.81, mars: 3.721, moon: 1.625 };
+      if (preset === 'custom') {
+        // Keep current value; the slider is already live-linked below.
+        document.getElementById('slider-gravity').focus();
+        return;
+      }
+      this.setGravity(presets[preset], { source: 'preset' });
     });
 
     // Parameter Sliders
@@ -1027,6 +1377,18 @@ class App {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  window.app = new App();
+async function loadCentralSettings() {
+  try {
+    const response = await fetch(`./config/simulation.settings.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch {
+    // Missing or unreadable file: run entirely on built-in defaults.
+    return {};
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const centralSettings = await loadCentralSettings();
+  window.app = new App(centralSettings);
 });

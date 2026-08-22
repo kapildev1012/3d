@@ -12,7 +12,7 @@ const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, v
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 
 export const ROUTE_LEARNING_DEFAULTS = Object.freeze({
-  version: 1,
+  version: 2,
   deadlineSeconds: 120,
   courseStartY: 10,
   courseGoalY: 60,
@@ -27,6 +27,23 @@ export const ROUTE_LEARNING_DEFAULTS = Object.freeze({
   maximumWaypointOffset: 0.24
 });
 
+export const LEVEL14_LEARNING_DEFAULTS = Object.freeze({
+  version: 4,
+  versionNote: 'open-world 1km x 1km expanse, start -450 m to goal +450 m',
+  deadlineSeconds: 5000,
+  courseStartY: -450,
+  courseGoalY: 450,
+  segmentLength: 5,
+  learningRate: 0.02,
+  minimumSpeedScale: 0.85,
+  maximumSpeedScale: 1.30,
+  minimumTorqueScale: 0.85,
+  maximumTorqueScale: 1.40,
+  minimumTractionScale: 0.85,
+  maximumTractionScale: 1.35,
+  maximumWaypointOffset: 0.50
+});
+
 const freshSegment = (index, settings) => ({
   index,
   startY: settings.courseStartY+index*settings.segmentLength,
@@ -39,7 +56,9 @@ const freshSegment = (index, settings) => ({
   slipEMA: 0,
   rollingErrorEMA: 0,
   gradeEMA: 0,
-  progressRateEMA: 0
+  progressRateEMA: 0,
+  energyEMA: 0,
+  checkpointReached: false
 });
 
 export class AdaptiveRouteLearner {
@@ -86,15 +105,20 @@ export class AdaptiveRouteLearner {
         const source = savedState.segments[index] || {};
         const target = this.segments[index];
         target.visits = Math.max(0, Math.floor(finite(source.visits)));
-        target.speedScale = clamp(finite(source.speedScale, 1), 0.92, 1.18);
-        target.torqueScale = clamp(finite(source.torqueScale, 1), 0.94, 1.24);
-        target.tractionScale = clamp(finite(source.tractionScale, 1), 0.92, 1.18);
+        target.speedScale = clamp(finite(source.speedScale, 1),
+          this.settings.minimumSpeedScale, this.settings.maximumSpeedScale);
+        target.torqueScale = clamp(finite(source.torqueScale, 1),
+          this.settings.minimumTorqueScale, this.settings.maximumTorqueScale);
+        target.tractionScale = clamp(finite(source.tractionScale, 1),
+          this.settings.minimumTractionScale, this.settings.maximumTractionScale);
         target.waypointX = clamp(finite(source.waypointX),
           -this.settings.maximumWaypointOffset, this.settings.maximumWaypointOffset);
         target.slipEMA = Math.max(0, finite(source.slipEMA));
         target.rollingErrorEMA = Math.max(0, finite(source.rollingErrorEMA));
         target.gradeEMA = Math.max(0, finite(source.gradeEMA));
         target.progressRateEMA = Math.max(0, finite(source.progressRateEMA));
+        target.energyEMA = Math.max(0, finite(source.energyEMA));
+        target.checkpointReached = Boolean(source.checkpointReached);
       }
     }
     return true;
@@ -155,7 +179,7 @@ export class AdaptiveRouteLearner {
     };
   }
 
-  observe({ time, x, y, speed, slip, rollingError, grade } = {}) {
+  observe({ time, x, y, speed, slip, rollingError, grade, energy = 0 } = {}) {
     if (!this.activeRun) this.beginRun();
     const run = this.activeRun;
     const currentTime = Math.max(0, finite(time));
@@ -169,7 +193,9 @@ export class AdaptiveRouteLearner {
       slipSum: 0,
       rollingErrorSum: 0,
       gradeSum: 0,
-      xSum: 0
+      xSum: 0,
+      energySum: 0,
+      checkpointReached: false
     };
     if (run.lastTime !== null) {
       sample.elapsed += clamp(currentTime-run.lastTime, 0, 0.25);
@@ -181,10 +207,21 @@ export class AdaptiveRouteLearner {
     sample.rollingErrorSum += Math.max(0, finite(rollingError));
     sample.gradeSum += Math.max(0, finite(grade));
     sample.xSum += finite(x);
+    sample.energySum += Math.max(0, finite(energy));
     run.segments.set(index, sample);
     run.started = true;
     run.lastTime = currentTime;
     run.lastY = currentY;
+  }
+
+  observeCheckpoint(y, energy = 0) {
+    if (!this.activeRun) return;
+    const index = this.segmentIndex(y);
+    const sample = this.activeRun.segments.get(index);
+    if (sample) {
+      sample.checkpointReached = true;
+      sample.energySum += energy;
+    }
   }
 
   finishRun({ reached = false, time = 0, finalY = 0, maxSlip = 0, rollingError = 0,
@@ -234,6 +271,8 @@ export class AdaptiveRouteLearner {
       segment.rollingErrorEMA += alpha*(avgRollingError-segment.rollingErrorEMA);
       segment.gradeEMA += alpha*(avgGrade-segment.gradeEMA);
       segment.progressRateEMA += alpha*(progressRate-segment.progressRateEMA);
+      const avgEnergy = observation.energySum ? observation.energySum/samples : 0;
+      segment.energyEMA += alpha*(avgEnergy-segment.energyEMA);
       segment.speedScale = clamp(segment.speedScale+lr*(0.08*paceDeficit-0.03*avgSlip), 0.92, 1.18);
       segment.torqueScale = clamp(segment.torqueScale+lr*(0.10*paceDeficit+0.18*avgRollingError+0.08*avgGrade), 0.94, 1.24);
       segment.tractionScale = clamp(segment.tractionScale+lr*(0.12*avgRollingError-0.05*avgSlip), 0.92, 1.18);
@@ -241,6 +280,9 @@ export class AdaptiveRouteLearner {
         ? clamp(0.80*segment.waypointX+0.20*avgX,
           -this.settings.maximumWaypointOffset, this.settings.maximumWaypointOffset)
         : 0.75*segment.waypointX;
+      if (observation.checkpointReached) {
+        segment.checkpointReached = true;
+      }
       segment.visits++;
     }
 

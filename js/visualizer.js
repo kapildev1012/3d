@@ -12,6 +12,123 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// ── Procedural texturing helpers (photoreal Mars surface treatment) ──
+
+/** Deterministic 2-D hash in [0, 1). */
+function hash2(x, y) {
+  const s = Math.sin(x*127.1+y*311.7)*43758.5453;
+  return s-Math.floor(s);
+}
+
+/** Small seeded PRNG (mulberry32) for scenery that must not touch physics. */
+function createLocalRng(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s+0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t+Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0)/4294967296;
+  };
+}
+
+/** Smooth value noise — the base layer for terrain colour variation. */
+function valueNoise(x, y) {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const tx = x-xi;
+  const ty = y-yi;
+  const sx = tx*tx*(3-2*tx);
+  const sy = ty*ty*(3-2*ty);
+  const h00 = hash2(xi, yi);
+  const h10 = hash2(xi+1, yi);
+  const h01 = hash2(xi, yi+1);
+  const h11 = hash2(xi+1, yi+1);
+  return h00*(1-sx)*(1-sy)+h10*sx*(1-sy)+h01*(1-sx)*sy+h11*sx*sy;
+}
+
+/** Value noise on a wrapping integer lattice so textures tile seamlessly. */
+function periodicNoise(x, y, period) {
+  const wrap = v => ((v % period)+period) % period;
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const tx = x-xi;
+  const ty = y-yi;
+  const sx = tx*tx*(3-2*tx);
+  const sy = ty*ty*(3-2*ty);
+  const h00 = hash2(wrap(xi), wrap(yi));
+  const h10 = hash2(wrap(xi+1), wrap(yi));
+  const h01 = hash2(wrap(xi), wrap(yi+1));
+  const h11 = hash2(wrap(xi+1), wrap(yi+1));
+  return h00*(1-sx)*(1-sy)+h10*sx*(1-sy)+h01*(1-sx)*sy+h11*sx*sy;
+}
+
+/** Tileable three-octave fBm for the generated surface textures. */
+function tileFbm(u, v) {
+  return 0.52*periodicNoise(u*6, v*6, 6)
+    +0.30*periodicNoise(u*12, v*12, 12)
+    +0.18*periodicNoise(u*24, v*24, 24);
+}
+
+let marsDetailTexturesCache = null;
+
+/**
+ * Generate (once per session) a tiled albedo + bump texture pair that gives
+ * the ground its fine granular Martian regolith grain at any camera
+ * distance. The albedo map is kept close to neutral grey with a faint warm
+ * bias so vertex colours remain the dominant tone carrier.
+ */
+function generateMarsSurfaceTextures(renderer) {
+  if (marsDetailTexturesCache) return marsDetailTexturesCache;
+  const SIZE = 512;
+  const makeCanvas = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    return canvas;
+  };
+  const albedoCanvas = makeCanvas();
+  const bumpCanvas = makeCanvas();
+  const albedoCtx = albedoCanvas.getContext('2d');
+  const bumpCtx = bumpCanvas.getContext('2d');
+  const albedo = albedoCtx.createImageData(SIZE, SIZE);
+  const bump = bumpCtx.createImageData(SIZE, SIZE);
+
+  // Perfectly tileable fBm on a wrapping lattice.
+  for (let py = 0; py < SIZE; py++) {
+    for (let px = 0; px < SIZE; px++) {
+      const v = tileFbm(px/SIZE, py/SIZE);
+
+      // Albedo: near-neutral multiplier (205–255) with a whisper of warmth.
+      const lum = 205+50*v;
+      const offset = (py*SIZE+px)*4;
+      albedo.data[offset] = Math.min(255, lum*1.02);
+      albedo.data[offset+1] = lum*0.985;
+      albedo.data[offset+2] = lum*0.955;
+      albedo.data[offset+3] = 255;
+
+      // Bump: same field, higher contrast for crisp micro-relief.
+      const relief = Math.max(0, Math.min(255, (v-0.18)*300));
+      bump.data[offset] = relief;
+      bump.data[offset+1] = relief;
+      bump.data[offset+2] = relief;
+      bump.data[offset+3] = 255;
+    }
+  }
+  albedoCtx.putImageData(albedo, 0, 0);
+  bumpCtx.putImageData(bump, 0, 0);
+
+  const anisotropy = renderer.capabilities?.getMaxAnisotropy?.() || 4;
+  const map = new THREE.CanvasTexture(albedoCanvas);
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = anisotropy;
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.anisotropy = anisotropy;
+  marsDetailTexturesCache = { map, bumpMap };
+  return marsDetailTexturesCache;
+}
+
 export class Visualizer {
   constructor(containerElement, roverModel, terrainModel, options = {}) {
     this.container = containerElement;
@@ -41,19 +158,32 @@ export class Visualizer {
     const height = this.container.clientHeight || 450;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x24130e);
-    this.scene.fog = new THREE.FogExp2(0x3a1f16, 0.012);
+    // Bright butterscotch Mars daytime: a dust-loaded sky whose colour the
+    // distance fog converges to, producing the seamless hazy horizon of the
+    // reference photographs. No roads, tracks, or artificial ground marks —
+    // the surface stays entirely natural.
+    const isExpedition = (this.terrainModel.cfg.experimentId === 14);
+    const dustySky = new THREE.Color(0xb2794e);
+    this.scene.background = dustySky;
+    this.scene.fog = new THREE.FogExp2(dustySky.getHex(),
+      isExpedition ? 0.0013 : 0.010);
 
     // Camera (Z is UP in physics simulation)
-    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1,
+      isExpedition ? 2500 : 200);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(-4, -6, 4);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Cinematic filmic response: deep contrast under a harsh single sun.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Stark midday shadows: plain PCF keeps contact edges crisp instead of
+    // buttery soft, matching the overhead-sun reference photography.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.container.innerHTML = '';
     this.container.appendChild(this.renderer.domElement);
@@ -66,30 +196,93 @@ export class Visualizer {
     this.controls.target.set(0, 3, 1.2);
     this.controls.update();
 
-    // Warm, dusty Mars lighting based on the supplied rocky-landscape photo.
-    const ambLight = new THREE.AmbientLight(0xffd5b8, 0.62);
+    // Zenith midday sun: intense overhead illumination with minimal
+    // lateral shadow spread. Hard, short shadows fall directly beneath.
+    const ambLight = new THREE.AmbientLight(0xffd9b8, 0.38);
     this.scene.add(ambLight);
 
-    const sunLight = new THREE.DirectionalLight(0xffe8d6, 1.5);
-    sunLight.position.set(12, -15, 25);
+    const sunLight = new THREE.DirectionalLight(0xfff6e8, 2.95);
+    sunLight.position.set(0, 0, 35);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
-    sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 120;
-    sunLight.shadow.camera.left = -12;
-    sunLight.shadow.camera.right = 12;
-    sunLight.shadow.camera.top = 50;
-    sunLight.shadow.camera.bottom = -10;
+    // Tight ortho frustum around the tracked rover keeps shadow texel density
+    // high, so stones and struts cast sharp contact shadows anywhere on the
+    // km² field (the light rides along in updateDual).
+    sunLight.shadow.camera.near = 1.0;
+    sunLight.shadow.camera.far = 90;
+    sunLight.shadow.camera.left = -11;
+    sunLight.shadow.camera.right = 11;
+    sunLight.shadow.camera.top = 11;
+    sunLight.shadow.camera.bottom = -11;
+    sunLight.shadow.bias = -0.00012;
+    sunLight.shadow.normalBias = 0.012;
+    sunLight.shadow.camera.updateProjectionMatrix();
+    this.sunLight = sunLight;
+    this.sunTarget = new THREE.Object3D();
     this.scene.add(sunLight);
+    this.scene.add(sunLight.target);
 
-    const hemiLight = new THREE.HemisphereLight(0xd99a75, 0x3b1d15, 0.58);
-    hemiLight.position.set(0, 0, 15);
+    const hemiLight = new THREE.HemisphereLight(0xd9a06b, 0x47231a, 0.50);
+    hemiLight.position.set(0, 0, 20);
     this.scene.add(hemiLight);
+
+    // Visible zenith sun: a blazing core plus a soft dust halo pinned far away
+    // along the light direction, placed nearly straight up for midday Mars.
+    this.sunDirection = new THREE.Vector3(0.5, -0.5, 60).normalize();
+    this.createSunSprites();
+    this._sunScratch = new THREE.Vector3();
 
     // Handle Resize
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.container);
+  }
+
+  createSunSprites() {
+    const SIZE = 256;
+    const makeGlowTexture = stops => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createRadialGradient(SIZE/2, SIZE/2, 0, SIZE/2, SIZE/2, SIZE/2);
+      for (const [stop, color] of stops) gradient.addColorStop(stop, color);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    };
+    const discMaterial = new THREE.SpriteMaterial({
+      map: makeGlowTexture([
+        [0.00, 'rgba(255,253,244,1)'],
+        [0.16, 'rgba(255,246,218,1)'],
+        [0.38, 'rgba(255,228,168,0.92)'],
+        [0.62, 'rgba(255,206,132,0.28)'],
+        [1.00, 'rgba(255,196,120,0)']
+      ]),
+      transparent: true,
+      fog: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    this.sunDisc = new THREE.Sprite(discMaterial);
+
+    const haloMaterial = new THREE.SpriteMaterial({
+      map: makeGlowTexture([
+        [0.00, 'rgba(255,232,190,0.55)'],
+        [0.35, 'rgba(255,214,158,0.20)'],
+        [0.70, 'rgba(250,196,138,0.06)'],
+        [1.00, 'rgba(245,188,128,0)']
+      ]),
+      transparent: true,
+      fog: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    this.sunHalo = new THREE.Sprite(haloMaterial);
+
+    this.scene.add(this.sunHalo);
+    this.scene.add(this.sunDisc);
   }
 
   onResize() {
@@ -102,13 +295,56 @@ export class Visualizer {
     this.renderer.setSize(width, height);
   }
 
+  // Sample the RENDERED terrain surface (position + partial slopes) at a
+  // world point, by bilinear interpolation across the display grid built in
+  // createTerrainMesh() (this.renderedSurface). The eye judges "floating"
+  // against this triangulated mesh, not against the continuous analytic
+  // field the physics solver walks on: on Level 14 the ~3 m vertex spacing
+  // sags visibly below the analytic height between vertices, which is
+  // exactly why scatter meshes drifted airborne. Falls back to the analytic
+  // field outside the displayed extents.
+  renderedSurfaceSample(worldX, worldY, modelType) {
+    const fallback = () => {
+      const physicsX = worldX-(modelType === 'adaptive' ? this.laneOffset : -this.laneOffset);
+      const surf = this.terrainModel.eval(physicsX, worldY, modelType);
+      return { h: surf.h || 0, sx: surf.dhdx || 0, sy: surf.dhdy || 0 };
+    };
+    const grid = this.renderedSurface;
+    if (!grid || worldX < grid.xMin || worldX > grid.xMax || worldY < grid.yMin || worldY > grid.yMax) {
+      return fallback();
+    }
+    const fx = (worldX-grid.xMin)/grid.sx;
+    const fy = (worldY-grid.yMin)/grid.sy;
+    const gx = Math.max(0, Math.min(grid.nx-2, Math.floor(fx)));
+    const gy = Math.max(0, Math.min(grid.ny-2, Math.floor(fy)));
+    const tx = Math.max(0, Math.min(1, fx-gx));
+    const ty = Math.max(0, Math.min(1, fy-gy));
+    const heights = grid.heights;
+    const at = (cx, cy) => heights[cy*grid.nx+cx];
+    const h00 = at(gx, gy), h10 = at(gx+1, gy), h01 = at(gx, gy+1), h11 = at(gx+1, gy+1);
+    const hLow = h00*(1-tx)+h10*tx;
+    const hHigh = h01*(1-tx)+h11*tx;
+    const h = hLow*(1-ty)+hHigh*ty;
+    // Partial slopes from the same bilinear patch (finite differences of the
+    // piecewise-linear surface), used to tilt meshes onto the ground normal.
+    const dx = grid.sx, dy = grid.sy;
+    const sxLow = (h10-h00)/dx, sxHigh = (h11-h01)/dx;
+    const sx = sxLow*(1-ty)+sxHigh*ty;
+    const syLeft = (h01-h00)/dy, syRight = (h11-h10)/dy;
+    const sy = syLeft*(1-tx)+syRight*tx;
+    return { h, sx, sy };
+  }
+
   createTerrainMesh() {
-    const Nx = 80;
-    const Ny = this.terrainModel.course ? 320 : 240;
-    const xMin = this.terrainModel.course ? -5 : -8;
-    const xMax = this.terrainModel.course ? 5 : 8;
-    const yMin = this.terrainModel.course ? 0 : -4;
-    const yMax = this.terrainModel.course ? 70 : 45;
+    const isKm = this.terrainModel.cfg.terrainLevel === 14;
+    // Level 14 is a true 1 km × 1 km open-world field centred on the origin:
+    // (x, y) ∈ [-500 m, +500 m] on both axes.
+    const Nx = isKm ? 320 : 80;
+    const Ny = this.terrainModel.course ? 320 : (isKm ? 320 : 240);
+    const xMin = this.terrainModel.course ? -5 : (isKm ? -500 : -8);
+    const xMax = this.terrainModel.course ? 5 : (isKm ? 500 : 8);
+    const yMin = this.terrainModel.course ? 0 : (isKm ? -500 : -4);
+    const yMax = this.terrainModel.course ? 70 : (isKm ? 500 : 45);
 
     const geometry = new THREE.PlaneGeometry(xMax - xMin, yMax - yMin, Nx, Ny);
     const posAttr = geometry.attributes.position;
@@ -119,7 +355,24 @@ export class Visualizer {
     const sandShadow = new THREE.Color(0x5a2d20);
     const sandMid = new THREE.Color(0x99563c);
     const sandSun = new THREE.Color(0xc47b55);
+    const dustBed = new THREE.Color(0xc99a6f);   // fine sand & dust beds
+    const dustDarkPool = new THREE.Color(0x43241a); // dark fine-grain basins
     const exposedRock = new THREE.Color(0x3e2924);
+    const marshDark = new THREE.Color(0x2e3a25);   // boggy green-brown
+    const marshLight = new THREE.Color(0x4a5438);   // lighter marsh edge
+
+    // Rendered-surface grid: the exact height samples that draw this mesh,
+    // kept for bilinear re-sampling so every scattered stone can be anchored
+    // onto the surface actually visible on screen (never above it).
+    const gridWidth = Nx+1;
+    const gridHeight = Ny+1;
+    const renderedHeights = new Float32Array(gridWidth*gridHeight);
+    this.renderedSurface = {
+      xMin, xMax, yMin, yMax,
+      nx: gridWidth, ny: gridHeight,
+      sx: (xMax-xMin)/Nx, sy: (yMax-yMin)/Ny,
+      heights: renderedHeights
+    };
 
     for (let i = 0; i < posAttr.count; i++) {
       const localX = posAttr.getX(i);
@@ -137,14 +390,44 @@ export class Visualizer {
       const surf = this.terrainModel.eval(physicsX, worldY, laneModel);
       posAttr.setZ(i, surf.h);
 
+      // Record the sample in the rendered-surface grid (row-major, clamped
+      // index math keeps rounding robust at the borders).
+      const gx = Math.max(0, Math.min(gridWidth-1,
+        Math.round((worldX-xMin)/((xMax-xMin)/Nx))));
+      const gy = Math.max(0, Math.min(gridHeight-1,
+        Math.round((worldY-yMin)/((yMax-yMin)/Ny))));
+      renderedHeights[gy*gridWidth+gx] = surf.h;
+
       const heightRatio = Math.max(0, Math.min(1, (surf.h+0.28)/0.85));
       const slope = Math.hypot(surf.dhdx, surf.dhdy);
+      // Multi-octave natural variation: broad albedo drift across the field,
+      // medium-scale dark-dust pooling in the lows, plus fine grain — the
+      // untouched surface keeps zero artificial patterning.
+      const macroDrift = valueNoise(physicsX*0.021+4.19, worldY*0.021+8.13);
+      const mesoDust = valueNoise(physicsX*0.09+37.7, worldY*0.09+91.3);
       const grainHash = Math.sin(127.1*physicsX+311.7*worldY)*43758.5453;
       const granularNoise = grainHash-Math.floor(grainHash);
-      const grain = 0.88+0.16*granularNoise;
+      const grain = 0.86+0.20*granularNoise;
       const c = sandShadow.clone().lerp(sandMid, Math.min(1, 0.30+1.1*heightRatio));
       c.lerp(sandSun, Math.max(0, Math.min(0.55, 0.35*heightRatio)));
       c.lerp(exposedRock, Math.max(0, Math.min(0.58, (slope-0.20)*0.85)));
+      // Wind-winnowed bright dust sheets vs darker fine-grain basins.
+      c.multiplyScalar(0.88+0.24*macroDrift);
+      c.lerp(dustDarkPool, Math.max(0, mesoDust-0.60)*0.60);
+      // Tint marsh zones with dark green-brown colour
+      if (this.terrainModel.marshes && this.terrainModel.marshes.length > 0) {
+        const marshInfo = this.terrainModel.marshAt(physicsX, worldY);
+        if (marshInfo.inMarsh) {
+          const marshBlend = Math.min(0.80, marshInfo.depth*0.9);
+          const marshTint = marshDark.clone().lerp(marshLight, 1.0-marshInfo.depth);
+          c.lerp(marshTint, marshBlend);
+        }
+      }
+      // Fine sand & dust beds read as pale, low-friction sheets.
+      if (this.terrainModel.sandPatches && this.terrainModel.sandPatches.length > 0) {
+        const sandInfo = this.terrainModel.sandAt(physicsX, worldY);
+        if (sandInfo.inSand) c.lerp(dustBed, Math.min(0.62, 0.62*sandInfo.depth));
+      }
       c.multiplyScalar(Math.max(0.76, grain));
       colors.push(c.r, c.g, c.b);
     }
@@ -152,9 +435,22 @@ export class Visualizer {
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
 
+    // Tiled regolith detail: the generated albedo multiplies the vertex
+    // colours while the bump map adds crisp millimetre grain under the harsh
+    // sun — "extreme texturing" without a texture download.
+    const detail = generateMarsSurfaceTextures(this.renderer);
+    const extentX = xMax-xMin;
+    const extentY = yMax-yMin;
+    const tileMetres = 3.2;
+    detail.map.repeat.set(extentX/tileMetres, extentY/tileMetres);
+    detail.bumpMap.repeat.set(extentX/tileMetres, extentY/tileMetres);
+
     const material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 1.0,
+      map: detail.map,
+      bumpMap: detail.bumpMap,
+      bumpScale: 0.45,
+      roughness: 0.96,
       metalness: 0.0,
       flatShading: true
     });
@@ -163,6 +459,49 @@ export class Visualizer {
     this.terrainMesh.position.set(0, (yMin + yMax) / 2, 0);
     this.terrainMesh.receiveShadow = true;
     this.scene.add(this.terrainMesh);
+
+    /**
+     * Bilinear re-sample of the rendered mesh surface. Returns NaN outside
+     * the drawn extent so callers can skip scenery that has no visible
+     * ground beneath it (the definitive anti-floating guarantee).
+     */
+    this.renderedHeightAt = (worldX, worldY) => {
+      const g = this.renderedSurface;
+      if (!g) return NaN;
+      const fx = (worldX-g.xMin)/g.sx;
+      const fy = (worldY-g.yMin)/g.sy;
+      if (fx < -0.001 || fy < -0.001 || fx > g.nx-1+0.001 || fy > g.ny-1+0.001) return NaN;
+      const ix = Math.max(0, Math.min(g.nx-2, Math.floor(fx)));
+      const iy = Math.max(0, Math.min(g.ny-2, Math.floor(fy)));
+      const tx = Math.max(0, Math.min(1, fx-ix));
+      const ty = Math.max(0, Math.min(1, fy-iy));
+      const h00 = g.heights[iy*g.nx+ix];
+      const h10 = g.heights[iy*g.nx+ix+1];
+      const h01 = g.heights[(iy+1)*g.nx+ix];
+      const h11 = g.heights[(iy+1)*g.nx+ix+1];
+      return h00*(1-tx)*(1-ty)+h10*tx*(1-ty)+h01*(1-tx)*ty+h11*tx*ty;
+    };
+
+    /** Lane mapping identical to the mesh loop above. */
+    this.laneSampleAt = (worldX, worldY) => {
+      const lane = worldX < 0 ? -this.laneOffset : this.laneOffset;
+      return {
+        physicsX: worldX-lane,
+        modelType: worldX >= 0 ? 'adaptive' : 'fixed'
+      };
+    };
+
+    /**
+     * Exact visible ground height under a world-space point: the lower of
+     * the analytic collision heightfield and the rendered mesh surface, so
+     * anchored objects can never hover above the drawn terrain.
+     */
+    this.groundZAt = (worldX, worldY) => {
+      const { physicsX, modelType } = this.laneSampleAt(worldX, worldY);
+      const analytic = this.terrainModel.eval(physicsX, worldY, modelType).h || 0;
+      const rendered = this.renderedHeightAt(worldX, worldY);
+      return Number.isFinite(rendered) ? Math.min(analytic, rendered) : analytic;
+    };
 
     // Glowing Finish Line Gate Arch at the configured endpoint.
     const goalY = this.terrainModel.course?.goalY || this.terrainModel.cfg.targetGoalY || 25.0;
@@ -177,17 +516,17 @@ export class Visualizer {
     });
 
     const pillarLeft = new THREE.Mesh(pillarGeom, pillarMat);
-    pillarLeft.position.set(-3.0, goalY, 1.75 + (this.terrainModel.eval(-3.0, goalY).h || 0));
+    pillarLeft.position.set(-3.0, goalY, 1.75 + this.groundZAt(-3.0, goalY));
     gateGroup.add(pillarLeft);
 
     const pillarRight = new THREE.Mesh(pillarGeom, pillarMat);
-    pillarRight.position.set(3.0, goalY, 1.75 + (this.terrainModel.eval(3.0, goalY).h || 0));
+    pillarRight.position.set(3.0, goalY, 1.75 + this.groundZAt(3.0, goalY));
     gateGroup.add(pillarRight);
 
     const archGeom = new THREE.CylinderGeometry(0.08, 0.08, 6.0, 16);
     const archBar = new THREE.Mesh(archGeom, pillarMat);
     archBar.rotation.z = Math.PI / 2;
-    archBar.position.set(0, goalY, 3.5 + (this.terrainModel.eval(0, goalY).h || 0));
+    archBar.position.set(0, goalY, 3.5 + this.groundZAt(0, goalY));
     gateGroup.add(archBar);
 
     // Glowing Finish Grid Banner Line
@@ -199,7 +538,7 @@ export class Visualizer {
       opacity: 0.7
     });
     const finishLine = new THREE.Mesh(finishLineGeom, finishLineMat);
-    finishLine.position.set(0, goalY, 0.02 + (this.terrainModel.eval(0, goalY).h || 0));
+    finishLine.position.set(0, goalY, 0.02 + this.groundZAt(0, goalY));
     gateGroup.add(finishLine);
 
     this.scene.add(gateGroup);
@@ -209,25 +548,27 @@ export class Visualizer {
       ? this.terrainModel.course.startY-1.0 : 0;
     const goalTarget = this.terrainModel.cfg.targetDestination || [0, goalY];
     const taskMarkerGroup = new THREE.Group();
+    const startMarkerGroundZ = this.groundZAt(this.laneOffset, startYMarker);
+    const goalMarkerGroundZ = this.groundZAt(goalTarget[0]+this.laneOffset, goalTarget[1]);
     const startMarker = new THREE.Mesh(
       new THREE.SphereGeometry(0.16, 20, 20),
       new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 1.0 })
     );
-    startMarker.position.set(this.laneOffset, startYMarker, this.terrainModel.eval(0, startYMarker, 'adaptive').h+0.18);
+    startMarker.position.set(this.laneOffset, startYMarker, startMarkerGroundZ+0.18);
     taskMarkerGroup.add(startMarker);
     const goalMarker = new THREE.Mesh(
       new THREE.TorusGeometry(0.30, 0.055, 12, 32),
       new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x16a34a, emissiveIntensity: 1.2 })
     );
-    goalMarker.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], this.terrainModel.eval(goalTarget[0], goalTarget[1], 'adaptive').h+0.08);
+    goalMarker.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], goalMarkerGroundZ+0.08);
     taskMarkerGroup.add(goalMarker);
     const startLabel = this.createTextSprite('START A', 'rgba(56, 189, 248, 1)');
     startLabel.scale.set(1.4, 0.35, 1);
-    startLabel.position.set(this.laneOffset, startYMarker, this.terrainModel.eval(0, startYMarker, 'adaptive').h+0.62);
+    startLabel.position.set(this.laneOffset, startYMarker, startMarkerGroundZ+0.62);
     taskMarkerGroup.add(startLabel);
     const goalLabel = this.createTextSprite('GOAL B', 'rgba(34, 197, 94, 1)');
     goalLabel.scale.set(1.4, 0.35, 1);
-    goalLabel.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], this.terrainModel.eval(goalTarget[0], goalTarget[1], 'adaptive').h+0.62);
+    goalLabel.position.set(goalTarget[0]+this.laneOffset, goalTarget[1], goalMarkerGroundZ+0.62);
     taskMarkerGroup.add(goalLabel);
     this.taskMarkerGroup = taskMarkerGroup;
     this.scene.add(taskMarkerGroup);
@@ -238,7 +579,7 @@ export class Visualizer {
         color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.72
       });
       const startLine = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.28), startMaterial);
-      startLine.position.set(0, startY, this.terrainModel.eval(0, startY).h+0.025);
+      startLine.position.set(0, startY, this.groundZAt(0, startY)+0.025);
       this.scene.add(startLine);
 
       // Build every benchmark obstacle from a small cluster of embedded
@@ -254,7 +595,11 @@ export class Visualizer {
             const localX = obstacle.x+radial*obstacle.radiusX*Math.cos(angle);
             const localY = obstacle.y+radial*obstacle.radiusY*Math.sin(angle);
             const shardHeight = obstacle.height*(shard === 0 ? 0.34 : 0.18+0.035*((shard+2*obstacleIndex)%3));
-            const surface = this.terrainModel.eval(localX, localY);
+            const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
+            // Anchor onto the exact visible ground of this lane.
+            const shardGroundZ = Math.min(
+              this.groundZAt(localX+laneOffset, localY),
+              this.renderedSurfaceSample(localX+laneOffset, localY, modelType).h);
             const geometry = shard%2 === 0
               ? new THREE.DodecahedronGeometry(1, 0)
               : new THREE.IcosahedronGeometry(1, 0);
@@ -269,10 +614,10 @@ export class Visualizer {
             const widthScale = obstacle.radiusX*(shard === 0 ? 0.38 : 0.23+0.035*(shard%3));
             const depthScale = obstacle.radiusY*(shard === 0 ? 0.31 : 0.20+0.03*((shard+1)%3));
             mesh.scale.set(widthScale, depthScale, shardHeight);
-            // Z-only rotation keeps every facet below the analytic solid
-            // surface; x/y tilt used to lift corners above collision height.
+            // Z-only rotation keeps every facet below the solid surface;
+            // x/y tilt would lift corners above collision height.
             mesh.rotation.set(0, 0, angle);
-            mesh.position.set(localX+laneOffset, localY, surface.h-shardHeight);
+            mesh.position.set(localX+laneOffset, localY, shardGroundZ-shardHeight);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             this.scene.add(mesh);
@@ -293,7 +638,7 @@ export class Visualizer {
         checkpointRing.position.set(
           obstacle.x+this.laneOffset,
           obstacle.y,
-          this.terrainModel.eval(obstacle.x, obstacle.y, 'adaptive').h+0.06
+          this.groundZAt(obstacle.x+this.laneOffset, obstacle.y)+0.06
         );
         this.scene.add(checkpointRing);
         const checkpointLabel = this.createTextSprite(`B${obstacleIndex+1}`, 'rgba(34, 211, 238, 1)');
@@ -301,101 +646,248 @@ export class Visualizer {
         checkpointLabel.position.set(
           obstacle.x+this.laneOffset,
           obstacle.y,
-          this.terrainModel.eval(obstacle.x, obstacle.y, 'adaptive').h+0.38
+          this.groundZAt(obstacle.x+this.laneOffset, obstacle.y)+0.38
         );
         this.scene.add(checkpointLabel);
       }
     }
 
-    // Render embedded low-poly Martian stones and broken mountain ridges.
-    if (this.terrainModel.rocks) {
-      for (let rock of this.terrainModel.rocks) {
-        const rockGeom = new THREE.DodecahedronGeometry(1, 0);
-        const shade = new THREE.Color(0x35241f).lerp(
-          new THREE.Color(0x704331), 0.25+0.45*(rock.colorSeed ?? 0.5));
-        const rockMat = new THREE.MeshStandardMaterial({
-          color: shade,
-          roughness: 1.0,
-          metalness: 0.0,
-          flatShading: true
-        });
-        const offsets = [-this.laneOffset, this.laneOffset];
-        for (const laneOffset of offsets) {
+    // Level 14 expedition obstacle chain: Level-10-style solid obstacles at
+    // expedition scale, drawn as shard clusters plus a cyan crest ring so the
+    // adaptive lane can see its sequential checkpoint targets.
+    if (this.terrainModel.expeditionObstacles?.length) {
+      const severityScale = { small: 1.0, medium: 1.25, large: 1.5 };
+      for (let obstacleIndex = 0; obstacleIndex < this.terrainModel.expeditionObstacles.length; obstacleIndex++) {
+        const obstacle = this.terrainModel.expeditionObstacles[obstacleIndex];
+        const severity = severityScale[obstacle.difficulty] || 1.0;
+        for (const laneOffset of [-this.laneOffset, this.laneOffset]) {
+          for (let shard = 0; shard < 5; shard++) {
+            const angle = obstacle.yaw+shard*2.39996+obstacleIndex*0.47;
+            const radial = shard === 0 ? 0 : 0.18+0.10*((shard+obstacleIndex)%3);
+            const localX = obstacle.x+radial*obstacle.radiusX*Math.cos(angle);
+            const localY = obstacle.y+radial*obstacle.radiusY*Math.sin(angle);
+            const shardHeight = obstacle.height*(shard === 0 ? 0.34 : 0.18+0.035*((shard+2*obstacleIndex)%3));
+            const expModelType = laneOffset > 0 ? 'adaptive' : 'fixed';
+            // Anchor onto the rendered mesh surface, not the analytic field,
+            // so shards never float above sagging display quads.
+            const surface = this.renderedSurfaceSample(localX+laneOffset, localY, expModelType);
+            const geometry = shard%2 === 0
+              ? new THREE.DodecahedronGeometry(1, 0)
+              : new THREE.IcosahedronGeometry(1, 0);
+            const material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(0x382923).lerp(
+                new THREE.Color(0x76503d), 0.18+0.10*((shard+obstacleIndex)%4)),
+              roughness: 1.0,
+              metalness: 0.0,
+              flatShading: true
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.scale.set(
+              obstacle.radiusX*(shard === 0 ? 0.38 : 0.23+0.035*(shard%3)),
+              obstacle.radiusY*(shard === 0 ? 0.31 : 0.20+0.03*((shard+1)%3)),
+              shardHeight
+            );
+            mesh.rotation.set(0, 0, angle);
+            mesh.position.set(localX+laneOffset, localY,
+              Math.min(surface.h, this.groundZAt(localX+laneOffset, localY))-shardHeight*0.6);
+            mesh.castShadow = true;
+            this.scene.add(mesh);
+          }
+        }
+        // Crest ring marks the scored checkpoint on the adaptive lane.
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.30*severity, 0.04, 10, 26),
+          new THREE.MeshStandardMaterial({
+            color: 0x22d3ee,
+            emissive: 0x0891b2,
+            emissiveIntensity: 1.35,
+            roughness: 0.35
+          })
+        );
+        ring.position.set(
+          obstacle.x+this.laneOffset,
+          obstacle.y,
+          this.groundZAt(obstacle.x+this.laneOffset, obstacle.y)+0.06
+        );
+        this.scene.add(ring);
+      }
+    }
+
+    // Level 14 expedition beacons: one glowing pylon every 50 m so a 1 km run
+    // reads as a chain of reachable milestones instead of an endless slope.
+    if (this.terrainModel.cfg.experimentId === 14 && !this.terrainModel.course) {
+      const startY = this.terrainModel.cfg.courseStartY || 10;
+      const goalY = this.terrainModel.cfg.targetGoalY || 800;
+      const spacing = this.terrainModel.cfg.waypointSpacing || 50;
+      const beaconGeometry = new THREE.CylinderGeometry(0.06, 0.10, 1.6, 8);
+      for (let y = startY+spacing; y < goalY; y += spacing) {
+        const index = Math.round((y-startY)/spacing)-1;
+        const beaconGroundZ = this.groundZAt(this.laneOffset, y);
+        const beacon = new THREE.Mesh(beaconGeometry, new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          emissive: 0x0284c7,
+          emissiveIntensity: 1.1,
+          roughness: 0.4
+        }));
+        beacon.position.set(this.laneOffset, y, beaconGroundZ+0.8);
+        this.scene.add(beacon);
+        const label = this.createTextSprite(`WP${index+1}`, 'rgba(56, 189, 248, 1)');
+        label.scale.set(0.9, 0.26, 1);
+        label.position.set(this.laneOffset, y, beaconGroundZ+1.85);
+        this.scene.add(label);
+      }
+    }
+
+    // ── Unified anchored surface scatter ──
+    // Every stone in the world (shared Mars scenery, Level 14 pebble /
+    // sharp-rock / boulder classes, Model B's private path stones and the
+    // course grit) is spawned through one pipeline: exact heightfield
+    // anchoring with a rendered-mesh clamp, ground-normal orientation and
+    // size-class instanced batches.
+    this.createScatterField();
+
+    // Level 14 horizon: a ring of low, weathered ridge/cliff silhouettes at
+    // the field fringe breaks the empty horizon exactly like the reference
+    // photography. Pure scenery beyond the mission corridor — never
+    // simulated — and fully fog-blended for atmospheric depth.
+    if (isKm && !this.terrainModel.course) {
+      const ridgeSeed = (this.terrainModel.cfg.seed ^ 0x0dd1d0d5) >>> 0;
+      const ridgeRng = createLocalRng(ridgeSeed);
+      const ridgeMaterials = [
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(0x4a2b1f), roughness: 1.0, metalness: 0.0, flatShading: true
+        }),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(0x6b4230), roughness: 1.0, metalness: 0.0, flatShading: true
+        })
+      ];
+      const ridgeCount = 18;
+      for (let i = 0; i < ridgeCount; i++) {
+        const theta = (i/ridgeCount)*Math.PI*2+(ridgeRng()-0.5)*0.30;
+        const radius = 458+ridgeRng()*30;
+        const x = Math.max(-494, Math.min(494, Math.cos(theta)*radius));
+        const y = Math.max(-494, Math.min(494, Math.sin(theta)*radius));
+        const length = 150+ridgeRng()*190;
+        const depth = 26+ridgeRng()*32;
+        const height = 16+ridgeRng()*38;
+        const geometry = new THREE.DodecahedronGeometry(1, 0);
+        const ridge = new THREE.Mesh(geometry,
+          ridgeMaterials[i%ridgeMaterials.length]);
+        ridge.scale.set(length*0.5, depth, height);
+        ridge.rotation.set(0, 0, theta+Math.PI/2+(ridgeRng()-0.5)*0.4);
+        ridge.position.set(x, y, this.groundZAt(x, y)-height*0.45);
+        this.scene.add(ridge);
+      }
+    }
+  }
+
+  // Size-class → low-poly geometry mapping for the scatter field.
+  scatterClassFor(rock) {
+    const r = Math.max(rock.rx || rock.r || 0.2, rock.ry || rock.r || 0.2);
+    if (rock.sharp) return 'sharp';
+    if (r >= 1.2) return 'boulder';
+    if (r <= 0.16 && (rock.h ?? 0) <= 0.13) return 'pebble';
+    return 'stone';
+  }
+
+  createScatterField() {
+    const bothLanes = [-this.laneOffset, this.laneOffset];
+    const items = [];
+    const collect = (rocks, lanes) => {
+      for (const rock of rocks || []) {
+        for (const laneOffset of lanes) {
           const worldX = rock.x+laneOffset;
           // The two terrain copies meet at x=0. Do not draw a side-scene
-          // rock after its lane offset carries it across that boundary,
+          // stone after its lane offset carries it across that boundary,
           // where the mesh would have no matching physical height field.
           if ((laneOffset < 0 && worldX >= 0) || (laneOffset > 0 && worldX < 0)) continue;
-          const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
-          const rockMesh = new THREE.Mesh(rockGeom, rockMat);
-          const rx = rock.rx || rock.r || 0.2;
-          const ry = rock.ry || rock.r || 0.2;
-          const renderedHeight = Math.max(0.06, 0.72*rock.h);
-          rockMesh.scale.set(rx, ry, renderedHeight);
-          rockMesh.rotation.z = rock.yaw || 0;
-          rockMesh.rotation.x = 0;
-          const crest = this.terrainModel.eval(rock.x, rock.y, modelType).h || 0;
-          // Embed the complete mesh below the analytic collision crest.
-          rockMesh.position.set(worldX, rock.y, crest-renderedHeight);
-          rockMesh.castShadow = true;
-          rockMesh.receiveShadow = true;
-          this.scene.add(rockMesh);
+          items.push({ rock, laneOffset, worldX });
         }
       }
+    };
+    collect(this.terrainModel.rocks, bothLanes);
+    // Cosmetic micro gravel rides the exact same anchoring pipeline — every
+    // chip is seated on the heightfield like a physical stone.
+    collect(this.terrainModel.decorChips, bothLanes);
+    if (this.terrainModel.course) {
+      collect(this.terrainModel.bPathRocks, [this.laneOffset]);
+      collect(this.terrainModel.courseGritRocks, bothLanes);
     }
 
-    // Extra embedded rocks appear only on Model B's right-hand path. Their
-    // mesh positions use the same adaptive terrain query as B's contact
-    // solver, so the rendered stone and the physical surface stay aligned.
-    if (this.terrainModel.course && this.terrainModel.bPathRocks) {
-      for (const rock of this.terrainModel.bPathRocks) {
-        const rockGeom = new THREE.DodecahedronGeometry(1, 0);
-        const rockMat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(0x2f2522).lerp(
-            new THREE.Color(0x684536), 0.22+0.34*(rock.colorSeed ?? 0.5)),
-          roughness: 1.0,
-          metalness: 0.0,
-          flatShading: true
-        });
-        const rockMesh = new THREE.Mesh(rockGeom, rockMat);
-        const renderedHeight = Math.max(0.035, 0.74*rock.h);
-        rockMesh.scale.set(rock.rx, rock.ry, renderedHeight);
-        rockMesh.rotation.z = rock.yaw || 0;
-        rockMesh.rotation.x = 0;
-        const crest = this.terrainModel.eval(rock.x, rock.y, 'adaptive').h || 0;
-        rockMesh.position.set(rock.x+this.laneOffset, rock.y, crest-renderedHeight);
-        rockMesh.castShadow = true;
-        rockMesh.receiveShadow = true;
-        this.scene.add(rockMesh);
+    const geometries = {
+      pebble: new THREE.IcosahedronGeometry(1, 0),
+      sharp: new THREE.OctahedronGeometry(1, 0),
+      stone: new THREE.DodecahedronGeometry(1, 0),
+      boulder: new THREE.DodecahedronGeometry(1, 0)
+    };
+    // Irregular stones read as dark, weathered basalt against the bright
+    // dust — high contrast makes every boulder pop with a hard shadow edge.
+    const shadeDark = new THREE.Color(0x1f1410);
+    const shadeLight = new THREE.Color(0x4c3126);
+    const pebbleTint = new THREE.Color(0x5d3d2b);
+    const boulderTint = new THREE.Color(0x140e0b);
+
+    const groups = new Map();
+    for (const { rock, laneOffset, worldX } of items) {
+      const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
+      // No drawn terrain beneath this stone (outside the rendered extent)?
+      // Skip it entirely — that is how stones used to hover over the void.
+      if (!Number.isFinite(this.renderedHeightAt?.(worldX, rock.y))) continue;
+      const sample = this.renderedSurfaceSample(worldX, rock.y, modelType);
+      // Exact anchor: the lower of the analytic collision crest and the
+      // rendered mesh surface guarantees the base can never sit above the
+      // visible ground, whatever the grid resolution does between vertices.
+      const groundZ = this.groundZAt(worldX, rock.y);
+      const cls = this.scatterClassFor(rock);
+      const rx = Math.max(0.02, rock.rx || rock.r || 0.2);
+      const ry = Math.max(0.02, rock.ry || rock.r || 0.2);
+      const exposedRatio = cls === 'pebble' ? 0.78 : 0.72;
+      const minHeight = cls === 'pebble' ? 0.03 : 0.05;
+      const renderedHeight = Math.max(minHeight, exposedRatio*(rock.h || 0.06));
+
+      let group = groups.get(cls);
+      if (!group) {
+        group = {
+          geometry: geometries[cls],
+          material: new THREE.MeshStandardMaterial({
+            color: 0xffffff, roughness: 1.0, metalness: 0.0, flatShading: true
+          }),
+          transforms: []
+        };
+        groups.set(cls, group);
       }
+      // Seat the centre below the visible surface: the top pokes out by
+      // ~3/4 of the rendered height while the base stays buried even across
+      // sagging quads, then tilt onto the local ground normal.
+      const centerZ = groundZ-0.25*renderedHeight;
+      const color = shadeDark.clone().lerp(shadeLight, 0.25+0.45*(rock.colorSeed ?? 0.5));
+      if (cls === 'pebble') color.lerp(pebbleTint, 0.35);
+      if (cls === 'boulder') color.lerp(boulderTint, 0.30);
+      const position = new THREE.Vector3(worldX, rock.y, centerZ);
+      const orientation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        Math.atan(sample.sy), -Math.atan(sample.sx), rock.yaw || 0, 'XYZ'));
+      const scale = new THREE.Vector3(rx, ry, renderedHeight);
+      group.transforms.push({ matrix: new THREE.Matrix4()
+        .compose(position, orientation, scale), color });
     }
 
-    // Physical coarse-sand grains embedded in every obstacle. These meshes
-    // correspond to the same Gaussian micro-outcrops used by the solver and
-    // make the high-friction summit surface visibly granular.
-    if (this.terrainModel.course && this.terrainModel.courseGritRocks) {
-      for (const grain of this.terrainModel.courseGritRocks) {
-        const geometry = new THREE.IcosahedronGeometry(1, 0);
-        const material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(0x4a3026).lerp(
-            new THREE.Color(0x8a5a40), 0.18+0.22*(grain.colorSeed ?? 0.5)),
-          roughness: 1.0,
-          metalness: 0.0,
-          flatShading: true
-        });
-        for (const laneOffset of [-this.laneOffset, this.laneOffset]) {
-          const modelType = laneOffset > 0 ? 'adaptive' : 'fixed';
-          const mesh = new THREE.Mesh(geometry, material);
-          const renderedHeight = Math.max(0.012, 0.72*grain.h);
-          mesh.scale.set(grain.rx, grain.ry, renderedHeight);
-          mesh.rotation.set(0, 0, grain.yaw);
-          const surface = this.terrainModel.eval(grain.x, grain.y, modelType).h;
-          mesh.position.set(grain.x+laneOffset, grain.y, surface-renderedHeight);
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          this.scene.add(mesh);
-        }
-      }
+    for (const [cls, group] of groups) {
+      const count = group.transforms.length;
+      if (!count) continue;
+      const mesh = new THREE.InstancedMesh(group.geometry, group.material, count);
+      group.transforms.forEach((transform, index) => {
+        mesh.setMatrixAt(index, transform.matrix);
+        mesh.setColorAt(index, transform.color);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      // Instances span the whole km²; never cull against the unit-geometry
+      // bounding sphere.
+      mesh.frustumCulled = false;
+      mesh.name = `scatter-${cls}`;
+      this.scene.add(mesh);
     }
   }
 
@@ -856,6 +1348,32 @@ export class Visualizer {
       const cz = (dualSimState.simA.diag.centroid[2] + refPosB_World[2]) / 2.0;
       this.controls.target.set(cx, cy, cz);
       this.camera.position.set(cx - 3.5, cy - 6.5, cz + 3.0);
+    }
+
+    // The sun rides along with the rover so the tight, sharp shadow frustum
+    // always covers the action — even 450 m out on the open expedition.
+    // Near-zenith offset keeps shadows short and stark, directly beneath.
+    if (this.sunLight && this.sunTarget) {
+      const focus = refPosB_World;
+      this.sunTarget.position.set(focus[0], focus[1], focus[2]);
+      this.sunLight.position.set(
+        focus[0]+this.sunDirection.x*40,
+        focus[1]+this.sunDirection.y*40,
+        focus[2]+this.sunDirection.z*40);
+      this.sunTarget.updateMatrixWorld();
+    }
+
+    // Pin the visible sun disc + halo far along the light direction from the
+    // camera: an infinitely distant sun with constant angular size that real
+    // ridges and terrain can still occlude.
+    if (this.sunDisc && this.sunHalo && this.sunDirection) {
+      const sunDistance = this.camera.far*0.80;
+      const sunPosition = this._sunScratch.copy(this.camera.position)
+        .addScaledVector(this.sunDirection, sunDistance);
+      this.sunDisc.position.copy(sunPosition);
+      this.sunHalo.position.copy(sunPosition);
+      this.sunDisc.scale.setScalar(sunDistance*0.055);
+      this.sunHalo.scale.setScalar(sunDistance*0.22);
     }
 
     this.controls.update();

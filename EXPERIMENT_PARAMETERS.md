@@ -29,7 +29,7 @@
 | Outer cable length envelope | 0.50–1.50 × nominal | Drive controller concept, scaled project envelope |
 | Restitution | 0.02 | Experiment-specific non-bouncy contact setting |
 | Ground friction | 4.00 in Level 10 | High-traction obstacle-climb surface; shared by A and B |
-| Gravity | 9.81 m/s² | Earth test condition |
+| Gravity | 9.81 m/s² default · top-bar presets for Earth 9.81 / Mars 3.721 / Moon 1.625 m/s² plus a custom slider | UI quick-select is bi-directionally synced with the sidebar slider; the whole solver (integration, Hertz contact weight support, Coulomb/traction envelopes, roll couples, payload G normalization) reads `cfg.gravity` live on every step |
 
 The payload G trace is the magnitude of the summed **non-gravitational suspension force divided by payload weight**. It is not the previous synthetic, clipped shell-centroid proxy.
 

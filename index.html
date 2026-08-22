@@ -1,357 +1,503 @@
 <!DOCTYPE html>
 <html lang="en" class="dark h-full">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>6-Bar Tensegrity Rover Simulator - Natural Support-Face Rolling</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6-Bar Tensegrity Rover Simulator - Natural Support-Face Rolling</title>
 
-  <!-- ES modules cannot run reliably when index.html is opened as file://. -->
-  <script>
-    if (window.location.protocol === 'file:') {
-      window.location.replace('http://127.0.0.1:3000/');
-    }
-  </script>
+    <!-- ES modules cannot run reliably when index.html is opened as file://. -->
+    <script>
+        if (window.location.protocol === 'file:') {
+            window.location.replace('http://127.0.0.1:3000/');
+        }
+    </script>
 
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Import Maps for Three.js ES Modules -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/examples/jsm/controls/OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js"
-      }
-    }
-  </script>
+    <!-- Import Maps for Three.js ES Modules -->
+    <script type="importmap">
+        { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/examples/jsm/controls/OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js" } }
+    </script>
 
-  <!-- Chart.js UMD -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Chart.js UMD -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
-  <style>
-    body {
-      background-color: #070a12;
-      color: #f8fafc;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    }
-    .glass-panel {
-      background: rgba(15, 23, 42, 0.82);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(51, 65, 85, 0.5);
-    }
-    .glow-cyan {
-      box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
-    }
-    .glow-emerald {
-      box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-
-    /* Layout guardrails for the live dashboard. */
-    *, *::before, *::after { box-sizing: border-box; }
-
-    .app-header,
-    .brand-block,
-    .brand-copy,
-    .control-bar,
-    .control-bar > *,
-    .main-layout,
-    .viewport-panel,
-    .parameter-sidebar,
-    .chart-card,
-    .data-panel {
-      min-width: 0;
-    }
-
-    .brand-block { flex: 1 1 430px; }
-    .brand-mark { flex: 0 0 auto; }
-    .brand-copy { flex: 1 1 auto; }
-    .brand-title {
-      flex-wrap: wrap;
-      line-height: 1.35;
-    }
-    .brand-badge {
-      max-width: 100%;
-      line-height: 1.35;
-      white-space: normal;
-    }
-
-    .app-header {
-      position: sticky;
-      top: 0;
-      padding: 0.75rem 1.5rem;
-      gap: 1rem;
-    }
-    .control-bar {
-      display: flex;
-      align-items: center;
-      flex: 1 1 100%;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-    }
-    .control-bar > div { max-width: 100%; }
-    .control-bar select {
-      min-width: 0;
-      max-width: 100%;
-      text-overflow: ellipsis;
-    }
-
-    /* The sidebar is taller than 520px. Let the grid establish its own height
+    <style>
+        body {
+            background-color: #070a12;
+            color: #f8fafc;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.82);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.5);
+        }
+        
+        .glow-cyan {
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
+        }
+        
+        .glow-emerald {
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+        }
+        
+         ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        
+         ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        
+         ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        /* Layout guardrails for the live dashboard. */
+        
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+        
+        .app-header,
+        .brand-block,
+        .brand-copy,
+        .control-bar,
+        .control-bar>*,
+        .main-layout,
+        .viewport-panel,
+        .parameter-sidebar,
+        .chart-card,
+        .data-panel {
+            min-width: 0;
+        }
+        
+        .brand-block {
+            flex: 1 1 430px;
+        }
+        
+        .brand-mark {
+            flex: 0 0 auto;
+        }
+        
+        .brand-copy {
+            flex: 1 1 auto;
+        }
+        
+        .brand-title {
+            flex-wrap: wrap;
+            line-height: 1.35;
+        }
+        
+        .brand-badge {
+            max-width: 100%;
+            line-height: 1.35;
+            white-space: normal;
+        }
+        
+        .app-header {
+            position: sticky;
+            top: 0;
+            padding: 0.75rem 1.5rem;
+            gap: 1rem;
+        }
+        
+        .control-bar {
+            display: flex;
+            align-items: center;
+            flex: 1 1 100%;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        
+        .control-bar>div {
+            max-width: 100%;
+        }
+        
+        .control-bar select {
+            min-width: 0;
+            max-width: 100%;
+            text-overflow: ellipsis;
+        }
+        /* The sidebar is taller than 520px. Let the grid establish its own height
        so the chart section cannot paint over the simulator or its controls. */
-    .main-layout {
-      flex: none;
-      height: auto;
-      min-height: 0;
-      align-items: stretch;
-      grid-auto-rows: auto;
-      gap: 1rem;
-      padding: 1rem;
-    }
-    .viewport-panel { min-height: 620px; }
-    .viewport-canvas { min-height: 620px; }
-
-    .experiment-chip {
-      max-width: calc(100% - 2rem);
-      line-height: 1.35;
-    }
-    .experiment-chip > span:last-child {
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-
-    .telemetry-hud {
-      width: min(620px, calc(100% - 2rem));
-      min-width: 0;
-      max-width: calc(100% - 2rem);
-    }
-    .telemetry-model { min-width: 0; }
-    .telemetry-model > div.flex {
-      gap: 0.75rem;
-    }
-    .telemetry-model > div.flex > span:last-child {
-      min-width: 0;
-      margin-left: auto;
-      text-align: right;
-      overflow-wrap: anywhere;
-    }
-
-    .parameter-list > div > div:first-child {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: start;
-      gap: 0.75rem;
-    }
-    .parameter-list > div > div:first-child > span:last-child {
-      min-width: 0;
-      max-width: 100%;
-      text-align: right;
-      overflow-wrap: anywhere;
-    }
-    .diagnostic-grid {
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
-      column-gap: 0.75rem;
-    }
-    .diagnostic-grid > span {
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-
-    .chart-title,
-    .section-title {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
-      gap: 0.35rem 1rem;
-      line-height: 1.35;
-    }
-    .chart-title {
-      flex: 0 0 auto;
-      justify-content: space-between;
-      margin-bottom: 0.85rem;
-    }
-    .chart-title > span,
-    .section-title > span { min-width: 0; }
-    .chart-card {
-      height: auto;
-      min-height: 18rem;
-    }
-    .chart-grid {
-      gap: 1rem;
-      padding: 1rem;
-    }
-    .parameter-sidebar,
-    .data-panel { padding: 1.25rem; }
-    .data-panel { max-width: 100%; }
-    .data-table { min-width: max-content; }
-    .monitoring-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.75rem;
-    }
-    .monitoring-card {
-      min-width: 0;
-      border: 1px solid rgba(51, 65, 85, 0.7);
-      background: rgba(2, 6, 23, 0.72);
-      border-radius: 0.75rem;
-      padding: 0.8rem;
-    }
-    .monitoring-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-      gap: 0.6rem;
-      align-items: start;
-    }
-    .monitoring-row > span:last-child { text-align: right; overflow-wrap: anywhere; }
-    .learning-card { grid-column: 1 / -1; }
-    .status-stable { color: #4ade80; border-color: rgba(34, 197, 94, 0.6); }
-    .status-moderate { color: #facc15; border-color: rgba(234, 179, 8, 0.6); }
-    .status-danger { color: #fb7185; border-color: rgba(244, 63, 94, 0.7); }
-    .status-goal { color: #67e8f9; border-color: rgba(34, 211, 238, 0.7); box-shadow: 0 0 18px rgba(34, 211, 238, 0.16); }
-
-    @media (max-width: 1023px) {
-      .app-header { position: static; }
-      .main-layout { grid-template-rows: auto auto; }
-      .viewport-panel,
-      .viewport-canvas { min-height: clamp(500px, 72vh, 680px); }
-      .monitoring-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-
-    @media (max-width: 640px) {
-      .app-header {
-        padding: 1rem;
-        gap: 1rem;
-      }
-      .brand-block { align-items: flex-start; }
-      .brand-title { font-size: 1rem; }
-      .brand-badge { font-size: 0.625rem; }
-
-      .control-bar {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.625rem;
-        width: 100%;
-      }
-      .control-bar > * { width: 100%; }
-      .control-bar > div {
-        justify-content: space-between;
-        gap: 0.5rem;
-      }
-      .control-bar > div select { flex: 1 1 auto; }
-      #btn-mode-toggle,
-      .terrain-control { grid-column: 1 / -1; }
-
-      .main-layout,
-      .chart-grid { padding: 0.75rem; gap: 0.75rem; }
-      .viewport-panel,
-      .viewport-canvas { min-height: 520px; }
-      .parameter-sidebar { padding: 1rem; }
-
-      .experiment-chip {
-        top: 0.75rem;
-        left: 0.75rem;
-        max-width: calc(100% - 1.5rem);
-      }
-      .telemetry-hud {
-        left: 0.75rem;
-        bottom: 0.75rem;
-        width: calc(100% - 1.5rem);
-        max-width: calc(100% - 1.5rem);
-        padding: 0.625rem;
-        gap: 0.625rem;
-        font-size: 0.625rem;
-      }
-      .telemetry-model-adaptive { padding-left: 0.625rem; }
-      .telemetry-model > div.flex { gap: 0.4rem; }
-
-      .chart-card { min-height: 20rem; }
-      .data-panel { padding: 1rem; }
-      .data-table th,
-      .data-table td {
-        padding-left: 0.75rem;
-        padding-right: 0.75rem;
-      }
-      .monitoring-grid { grid-template-columns: minmax(0, 1fr); }
-    }
-
-    @media (max-width: 420px) {
-      .brand-block { gap: 0.625rem; }
-      .brand-mark {
-        width: 2.25rem;
-        height: 2.25rem;
-        border-radius: 0.65rem;
-        font-size: 0.875rem;
-      }
-      .parameter-list > div > div:first-child {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 0.125rem;
-      }
-      .parameter-list > div > div:first-child > span:last-child {
-        text-align: left;
-      }
-      .telemetry-hud { max-height: 48%; overflow-y: auto; }
-      .monitoring-row { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
-      .monitoring-row > span:last-child { text-align: left; }
-    }
-  </style>
+        
+        .main-layout {
+            flex: none;
+            height: auto;
+            min-height: 0;
+            align-items: stretch;
+            grid-auto-rows: auto;
+            gap: 1rem;
+            padding: 1rem;
+        }
+        
+        .viewport-panel {
+            min-height: 620px;
+        }
+        
+        .viewport-canvas {
+            min-height: 620px;
+        }
+        
+        .experiment-chip {
+            max-width: calc(100% - 2rem);
+            line-height: 1.35;
+        }
+        
+        .experiment-chip>span:last-child {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        
+        .telemetry-hud {
+            width: min(620px, calc(100% - 2rem));
+            min-width: 0;
+            max-width: calc(100% - 2rem);
+        }
+        
+        .telemetry-model {
+            min-width: 0;
+        }
+        
+        .telemetry-model>div.flex {
+            gap: 0.75rem;
+        }
+        
+        .telemetry-model>div.flex>span:last-child {
+            min-width: 0;
+            margin-left: auto;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        
+        .parameter-list>div>div:first-child {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: start;
+            gap: 0.75rem;
+        }
+        
+        .parameter-list>div>div:first-child>span:last-child {
+            min-width: 0;
+            max-width: 100%;
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        
+        .diagnostic-grid {
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
+            column-gap: 0.75rem;
+        }
+        
+        .diagnostic-grid>span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        
+        .chart-title,
+        .section-title {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 0.35rem 1rem;
+            line-height: 1.35;
+        }
+        
+        .chart-title {
+            flex: 0 0 auto;
+            justify-content: space-between;
+            margin-bottom: 0.85rem;
+        }
+        
+        .chart-title>span,
+        .section-title>span {
+            min-width: 0;
+        }
+        
+        .chart-card {
+            height: auto;
+            min-height: 18rem;
+        }
+        
+        .chart-grid {
+            gap: 1rem;
+            padding: 1rem;
+        }
+        
+        .parameter-sidebar,
+        .data-panel {
+            padding: 1.25rem;
+        }
+        
+        .data-panel {
+            max-width: 100%;
+        }
+        
+        .data-table {
+            min-width: max-content;
+        }
+        
+        .monitoring-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+        
+        .monitoring-card {
+            min-width: 0;
+            border: 1px solid rgba(51, 65, 85, 0.7);
+            background: rgba(2, 6, 23, 0.72);
+            border-radius: 0.75rem;
+            padding: 0.8rem;
+        }
+        
+        .monitoring-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+            gap: 0.6rem;
+            align-items: start;
+        }
+        
+        .monitoring-row>span:last-child {
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+        
+        .learning-card {
+            grid-column: 1 / -1;
+        }
+        
+        .status-stable {
+            color: #4ade80;
+            border-color: rgba(34, 197, 94, 0.6);
+        }
+        
+        .status-moderate {
+            color: #facc15;
+            border-color: rgba(234, 179, 8, 0.6);
+        }
+        
+        .status-danger {
+            color: #fb7185;
+            border-color: rgba(244, 63, 94, 0.7);
+        }
+        
+        .status-goal {
+            color: #67e8f9;
+            border-color: rgba(34, 211, 238, 0.7);
+            box-shadow: 0 0 18px rgba(34, 211, 238, 0.16);
+        }
+        
+        @media (max-width: 1023px) {
+            .app-header {
+                position: static;
+            }
+            .main-layout {
+                grid-template-rows: auto auto;
+            }
+            .viewport-panel,
+            .viewport-canvas {
+                min-height: clamp(500px, 72vh, 680px);
+            }
+            .monitoring-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        
+        @media (max-width: 640px) {
+            .app-header {
+                padding: 1rem;
+                gap: 1rem;
+            }
+            .brand-block {
+                align-items: flex-start;
+            }
+            .brand-title {
+                font-size: 1rem;
+            }
+            .brand-badge {
+                font-size: 0.625rem;
+            }
+            .control-bar {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.625rem;
+                width: 100%;
+            }
+            .control-bar>* {
+                width: 100%;
+            }
+            .control-bar>div {
+                justify-content: space-between;
+                gap: 0.5rem;
+            }
+            .control-bar>div select {
+                flex: 1 1 auto;
+            }
+            #btn-mode-toggle,
+            .terrain-control {
+                grid-column: 1 / -1;
+            }
+            .main-layout,
+            .chart-grid {
+                padding: 0.75rem;
+                gap: 0.75rem;
+            }
+            .viewport-panel,
+            .viewport-canvas {
+                min-height: 520px;
+            }
+            .parameter-sidebar {
+                padding: 1rem;
+            }
+            .experiment-chip {
+                top: 0.75rem;
+                left: 0.75rem;
+                max-width: calc(100% - 1.5rem);
+            }
+            .telemetry-hud {
+                left: 0.75rem;
+                bottom: 0.75rem;
+                width: calc(100% - 1.5rem);
+                max-width: calc(100% - 1.5rem);
+                padding: 0.625rem;
+                gap: 0.625rem;
+                font-size: 0.625rem;
+            }
+            .telemetry-model-adaptive {
+                padding-left: 0.625rem;
+            }
+            .telemetry-model>div.flex {
+                gap: 0.4rem;
+            }
+            .chart-card {
+                min-height: 20rem;
+            }
+            .data-panel {
+                padding: 1rem;
+            }
+            .data-table th,
+            .data-table td {
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+            }
+            .monitoring-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+        
+        @media (max-width: 420px) {
+            .brand-block {
+                gap: 0.625rem;
+            }
+            .brand-mark {
+                width: 2.25rem;
+                height: 2.25rem;
+                border-radius: 0.65rem;
+                font-size: 0.875rem;
+            }
+            .parameter-list>div>div:first-child {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 0.125rem;
+            }
+            .parameter-list>div>div:first-child>span:last-child {
+                text-align: left;
+            }
+            .telemetry-hud {
+                max-height: 48%;
+                overflow-y: auto;
+            }
+            .monitoring-row {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 0.1rem;
+            }
+            .monitoring-row>span:last-child {
+                text-align: left;
+            }
+        }
+    </style>
 </head>
+
 <body class="h-full flex flex-col overflow-x-hidden selection:bg-cyan-500 selection:text-black">
 
-  <!-- Header Navbar -->
-  <header class="app-header glass-panel z-50 border-b border-slate-800 flex flex-wrap items-center justify-between">
-    <div class="brand-block flex items-center gap-3">
-      <div class="brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-emerald-400 flex items-center justify-center font-bold text-black text-lg shadow-lg shadow-cyan-500/20">
-        6-T
-      </div>
-      <div class="brand-copy">
-        <h1 class="brand-title text-lg font-bold tracking-wide text-white flex items-center gap-2">
-          6-Bar Tensegrity Icosahedron Rover
-          <span class="brand-badge text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">SUPERball Locomotion Architecture</span>
-        </h1>
-        <p class="text-xs text-slate-400">Classic 6-Bar Tensegrity Icosahedron • 24 Outer Cables • Suspended 0.1D Payload Core</p>
-      </div>
-    </div>
+    <!-- Header Navbar -->
+    <header class="app-header glass-panel z-50 border-b border-slate-800 flex flex-wrap items-center justify-between">
+        <div class="brand-block flex items-center gap-3">
+            <div class="brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-emerald-400 flex items-center justify-center font-bold text-black text-lg shadow-lg shadow-cyan-500/20">
+                6-T
+            </div>
+            <div class="brand-copy">
+                <h1 class="brand-title text-lg font-bold tracking-wide text-white flex items-center gap-2">
+                    6-Bar Tensegrity Icosahedron Rover
+                    <span class="brand-badge text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">SUPERball Locomotion Architecture</span>
+                </h1>
+                <p class="text-xs text-slate-400">Classic 6-Bar Tensegrity Icosahedron • 24 Outer Cables • Suspended 0.1D Payload Core</p>
+            </div>
+        </div>
 
-    <!-- Live Controls Bar -->
-    <div class="control-bar">
-      <!-- Mode Switcher -->
-      <button id="btn-mode-toggle" class="px-3.5 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 font-semibold text-xs border border-cyan-700/60 transition flex items-center gap-1.5">
+        <!-- Live Controls Bar -->
+        <div class="control-bar">
+            <!-- Mode Switcher -->
+            <button id="btn-mode-toggle" class="px-3.5 py-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 font-semibold text-xs border border-cyan-700/60 transition flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
         <span id="txt-mode-toggle">Mode: Locomotion Simulation</span>
       </button>
 
-      <!-- Gait Mode Selector -->
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span class="font-semibold text-slate-400">Gait Mode:</span>
-        <select id="select-gait-mode" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
+            <!-- Gait Mode Selector -->
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span class="font-semibold text-slate-400">Gait Mode:</span>
+                <select id="select-gait-mode" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
           <option value="roll_forward">Roll Forward (W)</option>
           <option value="roll_backward">Roll Backward (S)</option>
           <option value="steer_left">Steer Left (A)</option>
           <option value="steer_right">Steer Right (D)</option>
           <option value="none">Passive Equilibrium</option>
         </select>
-      </div>
+            </div>
 
-      <!-- Drive Controller Selector -->
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span class="font-semibold text-slate-400">Controller:</span>
-        <select id="select-controller" class="bg-transparent text-violet-400 font-semibold outline-none cursor-pointer">
+            <!-- Drive Controller Selector -->
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span class="font-semibold text-slate-400">Controller:</span>
+                <select id="select-controller" class="bg-transparent text-violet-400 font-semibold outline-none cursor-pointer">
           <option value="natural_support_face" selected>Natural Support-Face Gait</option>
+          <optgroup label="Drive-ported solvers">
+            <option value="riccati_lqr">LQR · Riccati Backward Pass</option>
+            <option value="ilqr_true">iLQR · Nonlinear Rollout</option>
+            <option value="ilqr_minimax_true">Robust iLQR · Adversarial</option>
+            <option value="qp_mpc_proj">QP-MPC · Projected Gradient</option>
+          </optgroup>
+          <optgroup label="Adaptive profiles">
+            <option value="lqr">LQR Rolling Direction</option>
+            <option value="lqr_payload">LQR + Payload Stabilization</option>
+            <option value="ilqr">Iterative LQR</option>
+            <option value="ilqr_minimax">iLQR Minimax Robust</option>
+            <option value="ilqr_minimax_penalty">iLQR Minimax + Input Penalty</option>
+            <option value="qp_mpc">QP-MPC Constrained</option>
+            <option value="qp_mpc_payload">QP-MPC + Payload Stabilization</option>
+            <option value="neural">Neural Geometry Policy</option>
+          </optgroup>
         </select>
-      </div>
+            </div>
 
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span class="font-semibold text-slate-400">Actuators:</span>
-        <select id="select-actuator-mode" disabled class="bg-transparent text-amber-400 font-semibold outline-none opacity-80">
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span class="font-semibold text-slate-400">Actuators:</span>
+                <select id="select-actuator-mode" disabled class="bg-transparent text-amber-400 font-semibold outline-none opacity-80">
           <option value="cables" selected>Cables only · rigid rods</option>
         </select>
-      </div>
+            </div>
 
-      <!-- Experiment Selector -->
-      <div class="terrain-control flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span class="font-semibold text-slate-400">Terrain Level:</span>
-        <select id="select-experiment" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
+            <!-- Experiment Selector -->
+            <div class="terrain-control flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span class="font-semibold text-slate-400">Terrain Level:</span>
+                <select id="select-experiment" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
           <option value="1">Level 1: Rough Mars Sand Flats</option>
           <option value="2">Level 2: Mars Small-Rock Field</option>
           <option value="3">Level 3: Mars Boulder Field</option>
@@ -359,468 +505,513 @@
           <option value="5">Level 5: Eroded Mars Crater</option>
           <option value="6">Level 6: Sandy Mars Slope (18°)</option>
           <option value="7">Level 7: Irregular Mars Mountains</option>
-          <option value="8">Level 8: Rough-Sand Endurance</option>
-          <option value="9">Level 9: Rocky Settling Recovery</option>
+          <option value="8">Level 8: Mixed-Size Boulder Scatter</option>
+          <option value="9">Level 9: Mars Marsh Wetlands</option>
           <option value="10" selected>Level 10: Learned Mars A-vs-B Mission</option>
+          <option value="11">Level 11: Uneven Rubble Field</option>
+          <option value="12">Level 12: Mars Bog & Boulder Gauntlet</option>
+          <option value="13">Level 13: Extreme Mars Composite</option>
+          <option value="14">Level 14: 1km² Open-World Mars Expedition</option>
         </select>
-      </div>
+            </div>
 
-      <button id="btn-play-pause" class="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-semibold text-sm transition shadow-md shadow-cyan-500/20">
+            <!-- Gravity Quick-Select -->
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span class="font-semibold text-slate-400">Gravity:</span>
+                <select id="select-gravity-preset" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
+          <option value="earth" selected>Earth · 9.81 m/s²</option>
+          <option value="mars">Mars · 3.721 m/s²</option>
+          <option value="moon">Moon · 1.625 m/s²</option>
+          
+        </select>
+            </div>
+
+            <button id="btn-play-pause" class="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-semibold text-sm transition shadow-md shadow-cyan-500/20">
         Pause
       </button>
 
-      <button id="btn-reset" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700 transition">
+            <button id="btn-reset" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-700 transition">
         Reset
       </button>
 
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span>Playback:</span>
-        <select id="select-speed" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span>Playback:</span>
+                <select id="select-speed" class="bg-transparent text-emerald-400 font-semibold outline-none cursor-pointer">
           <option value="0.25">0.25× Slow Motion</option>
           <option value="0.5">0.5× Slow Motion</option>
           <option value="1" selected>1× Realtime</option>
           <option value="2">2× Realtime</option>
           <option value="4">4× Realtime</option>
         </select>
-      </div>
+            </div>
 
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-        <span>Camera:</span>
-        <select id="select-camera" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
+                <span>Camera:</span>
+                <select id="select-camera" class="bg-transparent text-cyan-400 font-semibold outline-none cursor-pointer">
           <option value="chase">Chase Rover</option>
           <option value="orbit">Free Orbit</option>
           <option value="top">Top-Down (X-Y)</option>
           <option value="side">Side Elevation (Y-Z)</option>
         </select>
-      </div>
+            </div>
 
-      <!-- Force Overlay Toggle -->
-      <button id="btn-toggle-forces" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
+            <!-- Force Overlay Toggle -->
+            <button id="btn-toggle-forces" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
         Force Overlay: ON
       </button>
 
-      <button id="btn-toggle-debug" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
+            <button id="btn-toggle-debug" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 transition">
         IDs: OFF
       </button>
 
-      <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-cyan-400">
-        t = <span id="sim-time" class="font-bold">0.00 s</span>
-      </div>
-    </div>
-  </header>
-
-  <!-- GEOMETRY CHECKPOINT BANNER -->
-  <div id="geometry-checkpoint-banner" class="hidden bg-cyan-950/90 border-b border-cyan-800/80 px-6 py-2.5 text-xs font-mono flex flex-wrap items-center justify-between text-cyan-300">
-    <div class="flex items-center gap-3">
-      <span class="px-2 py-0.5 rounded bg-cyan-900 text-cyan-200 font-bold border border-cyan-700">MILESTONE 1 VALIDATION: 6-BAR TENSEGRITY ICOSAHEDRON</span>
-      <span>• Outer Diameter = <strong class="text-white">1.0D (1.00 m)</strong></span>
-      <span>• Inner Core Diameter = <strong class="text-white">0.10D (0.10 m)</strong></span>
-      <span>• Pre-tensioned Network: <strong class="text-emerald-400">SELF-EQUILIBRIUM PRESTRESS</strong></span>
-      <span>• Topology: <strong class="text-white">TRUE 6-BAR ICOSAHEDRON</strong> (No rigid joints)</span>
-    </div>
-    <div class="text-slate-400">SUPERball Research Paper Architecture • 6 Struts / 24 Outer Cables / 12 Core Cables</div>
-  </div>
-
-  <!-- Main Viewports Split Screen -->
-  <main class="main-layout grid grid-cols-1 lg:grid-cols-3">
-
-    <!-- Main 3D Canvas Viewport (2 Cols) -->
-    <div class="viewport-panel lg:col-span-2 glass-panel rounded-2xl overflow-hidden flex flex-col relative border border-slate-800/80">
-      <div class="experiment-chip absolute top-4 left-4 z-10 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-cyan-300 text-xs font-semibold backdrop-blur-md flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span id="txt-active-experiment-title">Level 10: Controlled 50 m A-vs-B Course</span>
-      </div>
-
-      <!-- Dual Telemetry Overlay HUD -->
-      <div class="telemetry-hud absolute bottom-4 left-4 z-10 p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-mono space-y-1 backdrop-blur-md text-slate-300 flex gap-4">
-        <!-- Model A: Fixed -->
-        <div class="telemetry-model space-y-1 flex-1">
-          <div class="text-slate-400 font-bold border-b border-slate-700 pb-1 mb-1">MODEL A: BASELINE · FREE PATH</div>
-          <div class="flex justify-between"><span>Velocity:</span> <span id="hud-a-vel" class="text-slate-200">0.00 m/s</span></div>
-          <div class="flex justify-between"><span>Max &omega;:</span> <span id="hud-a-omega" class="text-slate-200">0.00 rad/s</span></div>
-          <div class="flex justify-between"><span>Max Tension:</span> <span id="hud-a-tension" class="text-slate-200">0.0 N</span></div>
-          <div class="flex justify-between"><span>Deformation:</span> <span id="hud-a-deform" class="text-slate-200">0.00 m</span></div>
-          <div class="flex justify-between mt-1 pt-1 border-t border-slate-800"><span>State:</span> <span id="hud-a-gait" class="text-slate-300">PASSIVE_SETTLE</span></div>
-          <div class="flex justify-between"><span>Obstacles:</span> <span id="hud-a-obstacles" class="text-slate-300">0 over / 0 around</span></div>
+            <div class="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-cyan-400">
+                t = <span id="sim-time" class="font-bold">0.00 s</span>
+            </div>
         </div>
-        <!-- Model B: Adaptive -->
-        <div class="telemetry-model telemetry-model-adaptive space-y-1 flex-1 border-l border-slate-700 pl-4">
-          <div class="text-cyan-400 font-bold border-b border-cyan-800 pb-1 mb-1">MODEL B: ADAPTIVE · MUST GO OVER</div>
-          <div class="flex justify-between"><span>Velocity:</span> <span id="hud-b-vel" class="text-emerald-400">0.00 m/s</span></div>
-          <div class="flex justify-between"><span>Max &omega;:</span> <span id="hud-b-omega" class="text-amber-400">0.00 rad/s</span></div>
-          <div class="flex justify-between"><span>Max Tension:</span> <span id="hud-b-tension" class="text-rose-400">0.0 N</span></div>
-          <div class="flex justify-between"><span>Deformation:</span> <span id="hud-b-deform" class="text-emerald-400">0.00 m</span></div>
-          <div class="flex justify-between mt-1 pt-1 border-t border-slate-800"><span>State:</span> <span id="hud-b-gait" class="text-cyan-400 font-bold">ROLLING</span></div>
-          <div class="flex justify-between"><span>Controller:</span> <span id="hud-b-controller" class="text-violet-400">Natural Face Gait</span></div>
-          <div class="flex justify-between"><span>Constraint:</span> <span id="hud-b-constraint" class="text-emerald-400">0.000 mm</span></div>
-          <div class="flex justify-between"><span>Obstacles:</span> <span id="hud-b-obstacles" class="text-cyan-300">0 over / 0 around</span></div>
-          <div class="flex justify-between"><span>Bypass violations:</span> <span id="hud-b-bypass" class="text-emerald-400">0</span></div>
-        </div>
-      </div>
+    </header>
 
-      <!-- 3D Canvas Container -->
-      <div id="canvas-container-main" class="viewport-canvas w-full flex-1 bg-slate-950"></div>
+    <!-- GEOMETRY CHECKPOINT BANNER -->
+    <div id="geometry-checkpoint-banner" class="hidden bg-cyan-950/90 border-b border-cyan-800/80 px-6 py-2.5 text-xs font-mono flex flex-wrap items-center justify-between text-cyan-300">
+        <div class="flex items-center gap-3">
+            <span class="px-2 py-0.5 rounded bg-cyan-900 text-cyan-200 font-bold border border-cyan-700">MILESTONE 1 VALIDATION: 6-BAR TENSEGRITY ICOSAHEDRON</span>
+            <span>• Outer Diameter = <strong class="text-white">1.0D (1.00 m)</strong></span>
+            <span>• Inner Core Diameter = <strong class="text-white">0.10D (0.10 m)</strong></span>
+            <span>• Pre-tensioned Network: <strong class="text-emerald-400">SELF-EQUILIBRIUM PRESTRESS</strong></span>
+            <span>• Topology: <strong class="text-white">TRUE 6-BAR ICOSAHEDRON</strong> (No rigid joints)</span>
+        </div>
+        <div class="text-slate-400">SUPERball Research Paper Architecture • 6 Struts / 24 Outer Cables / 12 Core Cables</div>
     </div>
 
-    <!-- Right Sidebar Controls & Structural Optimizer -->
-    <div class="parameter-sidebar glass-panel rounded-2xl flex flex-col justify-between space-y-4">
-      <div>
-        <h3 class="section-title text-sm font-bold text-slate-200 border-b border-slate-800 pb-2.5 flex items-center justify-between">
-          <span>6-Bar Physics & Gait Parameters</span>
-          <span class="text-xs text-cyan-400 font-mono">Live Tuning</span>
-        </h3>
+    <!-- Main Viewports Split Screen -->
+    <main class="main-layout grid grid-cols-1 lg:grid-cols-3">
 
-        <div class="parameter-list space-y-3.5 text-xs mt-3">
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Gravity ($g_Z$ Downward):</span>
-              <span id="val-gravity" class="font-mono text-emerald-400">9.81 m/s² (Earth)</span>
+        <!-- Main 3D Canvas Viewport (2 Cols) -->
+        <div class="viewport-panel lg:col-span-2 glass-panel rounded-2xl overflow-hidden flex flex-col relative border border-slate-800/80">
+            <div class="experiment-chip absolute top-4 left-4 z-10 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-cyan-300 text-xs font-semibold backdrop-blur-md flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="txt-active-experiment-title">Level 10: Controlled 50 m A-vs-B Course</span>
             </div>
-            <input id="slider-gravity" type="range" min="0.0" max="20.0" step="0.5" value="9.81" class="w-full accent-emerald-400 cursor-pointer">
-          </div>
 
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Cable Pretension:</span>
-              <span id="val-pretension" class="font-mono text-cyan-400">40.0 N</span>
+            <!-- Dual Telemetry Overlay HUD -->
+            <div class="telemetry-hud absolute bottom-4 left-4 z-10 p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-mono space-y-1 backdrop-blur-md text-slate-300 flex gap-4">
+                <!-- Model A: Fixed -->
+                <div class="telemetry-model space-y-1 flex-1">
+                    <div class="text-slate-400 font-bold border-b border-slate-700 pb-1 mb-1">MODEL A: BASELINE · FREE PATH</div>
+                    <div class="flex justify-between"><span>Velocity:</span> <span id="hud-a-vel" class="text-slate-200">0.00 m/s</span></div>
+                    <div class="flex justify-between"><span>Max &omega;:</span> <span id="hud-a-omega" class="text-slate-200">0.00 rad/s</span></div>
+                    <div class="flex justify-between"><span>Max Tension:</span> <span id="hud-a-tension" class="text-slate-200">0.0 N</span></div>
+                    <div class="flex justify-between"><span>Deformation:</span> <span id="hud-a-deform" class="text-slate-200">0.00 m</span></div>
+                    <div class="flex justify-between mt-1 pt-1 border-t border-slate-800"><span>State:</span> <span id="hud-a-gait" class="text-slate-300">PASSIVE_SETTLE</span></div>
+                    <div class="flex justify-between"><span>Obstacles:</span> <span id="hud-a-obstacles" class="text-slate-300">0 over / 0 around</span></div>
+                </div>
+                <!-- Model B: Adaptive -->
+                <div class="telemetry-model telemetry-model-adaptive space-y-1 flex-1 border-l border-slate-700 pl-4">
+                    <div class="text-cyan-400 font-bold border-b border-cyan-800 pb-1 mb-1">MODEL B: ADAPTIVE · MUST GO OVER</div>
+                    <div class="flex justify-between"><span>Velocity:</span> <span id="hud-b-vel" class="text-emerald-400">0.00 m/s</span></div>
+                    <div class="flex justify-between"><span>Max &omega;:</span> <span id="hud-b-omega" class="text-amber-400">0.00 rad/s</span></div>
+                    <div class="flex justify-between"><span>Max Tension:</span> <span id="hud-b-tension" class="text-rose-400">0.0 N</span></div>
+                    <div class="flex justify-between"><span>Deformation:</span> <span id="hud-b-deform" class="text-emerald-400">0.00 m</span></div>
+                    <div class="flex justify-between mt-1 pt-1 border-t border-slate-800"><span>State:</span> <span id="hud-b-gait" class="text-cyan-400 font-bold">ROLLING</span></div>
+                    <div class="flex justify-between"><span>Controller:</span> <span id="hud-b-controller" class="text-violet-400">Natural Face Gait</span></div>
+                    <div class="flex justify-between"><span>Constraint:</span> <span id="hud-b-constraint" class="text-emerald-400">0.000 mm</span></div>
+                    <div class="flex justify-between"><span>Obstacles:</span> <span id="hud-b-obstacles" class="text-cyan-300">0 over / 0 around</span></div>
+                    <div class="flex justify-between"><span>Bypass violations:</span> <span id="hud-b-bypass" class="text-emerald-400">0</span></div>
+                </div>
             </div>
-            <input id="slider-pretension" type="range" min="10.0" max="80.0" step="2.5" value="40.0" class="w-full accent-cyan-400 cursor-pointer">
-          </div>
 
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Cable Stiffness ($k_S$):</span>
-              <span id="val-stiffness" class="font-mono text-cyan-400">1200 N/m</span>
-            </div>
-            <input id="slider-stiffness" type="range" min="200" max="2500" step="50" value="1200" class="w-full accent-cyan-400 cursor-pointer">
-          </div>
-
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Rest-Length Actuation ($\Delta L$):</span>
-              <span id="val-actuation" class="font-mono text-cyan-400">0.120 m</span>
-            </div>
-            <input id="slider-actuation" type="range" min="0.060" max="0.160" step="0.010" value="0.120" class="w-full accent-cyan-400 cursor-pointer">
-          </div>
-
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Restitution ($e_{rest}$):</span>
-              <span id="val-restitution" class="font-mono text-emerald-400">0.02 (non-bouncy lock)</span>
-            </div>
-            <input id="slider-restitution" type="range" min="0.02" max="0.02" step="0.01" value="0.02" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
-          </div>
-
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Terrain Roughness (RMS):</span>
-              <span id="val-roughness" class="font-mono text-cyan-400">0.06 m</span>
-            </div>
-            <input id="slider-roughness" type="range" min="0.0" max="0.35" step="0.01" value="0.06" class="w-full accent-cyan-400 cursor-pointer">
-          </div>
-
-          <div>
-            <div class="flex justify-between text-slate-300 mb-1">
-              <span>Target Locomotion Speed:</span>
-              <span id="val-target-speed" class="font-mono text-emerald-400">1.30 m/s rolling target</span>
-            </div>
-            <input id="slider-target-speed" type="range" min="0.20" max="1.30" step="0.01" value="1.30" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
-          </div>
+            <!-- 3D Canvas Container -->
+            <div id="canvas-container-main" class="viewport-canvas w-full flex-1 bg-slate-950"></div>
         </div>
-      </div>
 
-      <!-- Natural rolling controller and diagnostics -->
-      <div class="p-4 rounded-xl bg-slate-900/90 border border-violet-900/70 space-y-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-violet-400">Natural Rolling Diagnostics</span>
-          <button id="btn-toggle-relaxation" class="px-2 py-1 rounded bg-slate-950 text-slate-400 border border-slate-800 text-[10px] font-bold">RELAXATION: OFF</button>
-        </div>
-        <div class="grid grid-cols-3 gap-2 text-[10px] font-mono text-center">
-          <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Physics</div><div class="text-emerald-300">500 Hz</div></div>
-          <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Control</div><div id="control-rate-value" class="text-violet-300">50 Hz</div></div>
-          <div class="rounded bg-slate-950 p-1.5"><div class="text-slate-500">Render</div><div class="text-cyan-300">≤60 Hz</div></div>
-        </div>
-        <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
-          <label class="text-slate-400 col-span-2">Global X incline <span id="val-incline" class="text-white font-mono">0°</span>
+        <!-- Right Sidebar Controls & Structural Optimizer -->
+        <div class="parameter-sidebar glass-panel rounded-2xl flex flex-col justify-between space-y-4">
+            <div>
+                <h3 class="section-title text-sm font-bold text-slate-200 border-b border-slate-800 pb-2.5 flex items-center justify-between">
+                    <span>6-Bar Physics & Gait Parameters</span>
+                    <span class="text-xs text-cyan-400 font-mono">Live Tuning</span>
+                </h3>
+
+                <div class="parameter-list space-y-3.5 text-xs mt-3">
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Gravity ($g_Z$ Downward):</span>
+                            <span id="val-gravity" class="font-mono text-emerald-400">9.81 m/s² (Earth)</span>
+                        </div>
+                        <input id="slider-gravity" type="range" min="0.0" max="20.0" step="0.01" value="9.81" class="w-full accent-emerald-400 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Cable Pretension:</span>
+                            <span id="val-pretension" class="font-mono text-cyan-400">40.0 N</span>
+                        </div>
+                        <input id="slider-pretension" type="range" min="10.0" max="80.0" step="2.5" value="40.0" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Cable Stiffness ($k_S$):</span>
+                            <span id="val-stiffness" class="font-mono text-cyan-400">1200 N/m</span>
+                        </div>
+                        <input id="slider-stiffness" type="range" min="200" max="2500" step="50" value="1200" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Rest-Length Actuation ($\Delta L$):</span>
+                            <span id="val-actuation" class="font-mono text-cyan-400">0.120 m</span>
+                        </div>
+                        <input id="slider-actuation" type="range" min="0.060" max="0.160" step="0.010" value="0.120" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Restitution ($e_{rest}$):</span>
+                            <span id="val-restitution" class="font-mono text-emerald-400">0.02 (non-bouncy lock)</span>
+                        </div>
+                        <input id="slider-restitution" type="range" min="0.02" max="0.02" step="0.01" value="0.02" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Terrain Roughness (RMS):</span>
+                            <span id="val-roughness" class="font-mono text-cyan-400">0.06 m</span>
+                        </div>
+                        <input id="slider-roughness" type="range" min="0.0" max="0.35" step="0.01" value="0.06" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-slate-300 mb-1">
+                            <span>Target Locomotion Speed:</span>
+                            <span id="val-target-speed" class="font-mono text-emerald-400">1.30 m/s rolling target</span>
+                        </div>
+                        <input id="slider-target-speed" type="range" min="0.20" max="1.30" step="0.01" value="1.30" disabled class="w-full accent-emerald-400 opacity-70 cursor-not-allowed">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Natural rolling controller and diagnostics -->
+            <div class="p-4 rounded-xl bg-slate-900/90 border border-violet-900/70 space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-violet-400">Natural Rolling Diagnostics</span>
+                    <button id="btn-toggle-relaxation" class="px-2 py-1 rounded bg-slate-950 text-slate-400 border border-slate-800 text-[10px] font-bold">RELAXATION: OFF</button>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-[10px] font-mono text-center">
+                    <div class="rounded bg-slate-950 p-1.5">
+                        <div class="text-slate-500">Physics</div>
+                        <div class="text-emerald-300">500 Hz</div>
+                    </div>
+                    <div class="rounded bg-slate-950 p-1.5">
+                        <div class="text-slate-500">Control</div>
+                        <div id="control-rate-value" class="text-violet-300">50 Hz</div>
+                    </div>
+                    <div class="rounded bg-slate-950 p-1.5">
+                        <div class="text-slate-500">Render</div>
+                        <div class="text-cyan-300">≤60 Hz</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                    <label class="text-slate-400 col-span-2">Global X incline <span id="val-incline" class="text-white font-mono">0°</span>
             <input id="slider-incline" type="range" min="-20" max="20" step="1" value="0" class="w-full accent-amber-400">
           </label>
-        </div>
-        <div class="diagnostic-grid grid gap-1 text-[10px] font-mono border-t border-slate-800 pt-2">
-          <span class="text-slate-500">Profile</span><span id="drive-controller-status" class="text-violet-300 text-right">Natural Support-Face</span>
-          <span class="text-slate-500">Control cost</span><span id="drive-control-cost" class="text-cyan-300 text-right">0.000</span>
-          <span class="text-slate-500">Rod residual</span><span id="drive-constraint-error" class="text-emerald-300 text-right">0.000 mm</span>
-          <span class="text-slate-500">Ground clearance</span><span id="drive-terrain-clearance" class="text-emerald-300 text-right">3.000 mm</span>
-          <span class="text-slate-500">Support face / edge</span><span id="drive-support-face" class="text-cyan-300 text-right">— / —</span>
-          <span class="text-slate-500">COM margin</span><span id="drive-com-margin" class="text-amber-300 text-right">—</span>
-          <span class="text-slate-500">Contact slip</span><span id="drive-slip-speed" class="text-emerald-300 text-right">0.000 m/s</span>
-          <span class="text-slate-500">Rolling ratio</span><span id="drive-rolling-ratio" class="text-violet-300 text-right">0.00</span>
-          <span class="text-slate-500">Kinetic energy</span><span id="drive-kinetic-energy" class="text-rose-300 text-right">0.000 J</span>
-          <span class="text-slate-500">Completed rolls</span><span id="drive-completed-rolls" class="text-emerald-300 text-right">0</span>
-          <span class="text-slate-500">Active C / R</span><span id="drive-active-cables" class="text-amber-300 text-right">0C / 24 · 0R / 6</span>
-          <span class="text-slate-500">Relaxed cables</span><span id="drive-relaxation" class="text-fuchsia-300 text-right">0%</span>
-        </div>
-      </div>
+                </div>
+                <div class="diagnostic-grid grid gap-1 text-[10px] font-mono border-t border-slate-800 pt-2">
+                    <span class="text-slate-500">Profile</span><span id="drive-controller-status" class="text-violet-300 text-right">Natural Support-Face</span>
+                    <span class="text-slate-500">Control cost</span><span id="drive-control-cost" class="text-cyan-300 text-right">0.000</span>
+                    <span class="text-slate-500">Rod residual</span><span id="drive-constraint-error" class="text-emerald-300 text-right">0.000 mm</span>
+                    <span class="text-slate-500">Ground clearance</span><span id="drive-terrain-clearance" class="text-emerald-300 text-right">3.000 mm</span>
+                    <span class="text-slate-500">Support face / edge</span><span id="drive-support-face" class="text-cyan-300 text-right">— / —</span>
+                    <span class="text-slate-500">COM margin</span><span id="drive-com-margin" class="text-amber-300 text-right">—</span>
+                    <span class="text-slate-500">Contact slip</span><span id="drive-slip-speed" class="text-emerald-300 text-right">0.000 m/s</span>
+                    <span class="text-slate-500">Rolling ratio</span><span id="drive-rolling-ratio" class="text-violet-300 text-right">0.00</span>
+                    <span class="text-slate-500">Kinetic energy</span><span id="drive-kinetic-energy" class="text-rose-300 text-right">0.000 J</span>
+                    <span class="text-slate-500">Completed rolls</span><span id="drive-completed-rolls" class="text-emerald-300 text-right">0</span>
+                    <span class="text-slate-500">Active C / R</span><span id="drive-active-cables" class="text-amber-300 text-right">0C / 24 · 0R / 6</span>
+                    <span class="text-slate-500">Relaxed cables</span><span id="drive-relaxation" class="text-fuchsia-300 text-right">0%</span>
+                </div>
+            </div>
 
-      <!-- Automated Structural Optimizer Card -->
-      <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+            <!-- Automated Structural Optimizer Card -->
+            <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Structural Optimizer
-          </span>
-          <span class="text-[10px] text-slate-400 font-mono">Automated Search</span>
-        </div>
-        <p class="text-[11px] text-slate-400 leading-tight">
-          Optimizes cable pretension, stiffness, and actuation rest-length contraction to maximize rolling speed & core isolation.
-        </p>
-        <button id="btn-run-optimization" class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-xs transition shadow-md shadow-emerald-500/20">
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">Automated Search</span>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                    Optimizes cable pretension, stiffness, and actuation rest-length contraction to maximize rolling speed & core isolation.
+                </p>
+                <button id="btn-run-optimization" class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-xs transition shadow-md shadow-emerald-500/20">
           Run Parameter Optimization
         </button>
-        <div id="opt-results-box" class="hidden text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800 space-y-1">
-          <div>Best Pretension: <span id="opt-pretension" class="text-emerald-400 font-bold">40 N</span></div>
-          <div>Best Stiffness: <span id="opt-stiffness" class="text-emerald-400 font-bold">1200 N/m</span></div>
-          <div>Optimization Score: <span id="opt-score" class="text-cyan-400 font-bold">96.4 / 100</span></div>
-        </div>
-      </div>
+                <div id="opt-results-box" class="hidden text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800 space-y-1">
+                    <div>Best Pretension: <span id="opt-pretension" class="text-emerald-400 font-bold">40 N</span></div>
+                    <div>Best Stiffness: <span id="opt-stiffness" class="text-emerald-400 font-bold">1200 N/m</span></div>
+                    <div>Optimization Score: <span id="opt-score" class="text-cyan-400 font-bold">96.4 / 100</span></div>
+                </div>
+            </div>
 
-    </div>
-  </main>
-
-  <!-- Complete real-time monitoring HUD -->
-  <section class="px-4 pb-0">
-    <div class="glass-panel rounded-2xl p-4 space-y-3">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-sm font-bold text-white">Real-Time Mission & Structural Monitoring</h2>
-          <p class="text-[11px] text-slate-400 mt-1">120 s mission deadline · persistent GPS-segment learning · bounded gradient updates after every attempt.</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <span id="monitor-status" class="px-3 py-1 rounded-lg border bg-slate-950 text-xs font-bold font-mono status-stable">STABLE</span>
-          <label class="text-[10px] text-slate-400">Goal radius
+    </main>
+
+    <!-- Complete real-time monitoring HUD -->
+    <section class="px-4 pb-0">
+        <div class="glass-panel rounded-2xl p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-bold text-white">Real-Time Mission & Structural Monitoring</h2>
+                    <p class="text-[11px] text-slate-400 mt-1">120 s mission deadline · persistent GPS-segment learning · bounded gradient updates after every attempt.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span id="monitor-gravity" class="px-3 py-1 rounded-lg border bg-slate-950 text-xs font-bold font-mono status-goal">g = 9.810 m/s²</span>
+                    <span id="monitor-status" class="px-3 py-1 rounded-lg border bg-slate-950 text-xs font-bold font-mono status-stable">STABLE</span>
+                    <label class="text-[10px] text-slate-400">Goal radius
             <input id="input-goal-threshold" type="range" min="0.10" max="1.50" step="0.05" value="0.50" class="align-middle w-24 accent-cyan-400">
             <span id="val-goal-threshold" class="text-cyan-300 font-mono">0.50 m</span>
           </label>
-        </div>
-      </div>
-
-      <div class="monitoring-grid text-[11px] font-mono">
-        <article class="monitoring-card space-y-1.5">
-          <h3 class="text-cyan-300 font-bold border-b border-slate-800 pb-1">Goal Tracking · A → B</h3>
-          <div class="monitoring-row"><span class="text-slate-500">Start A</span><span id="monitor-start" class="text-slate-200">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Goal B</span><span id="monitor-goal" class="text-emerald-300">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">COM(t)</span><span id="monitor-com" class="text-white">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Goal error</span><span id="monitor-goal-error" class="text-cyan-300">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Remaining X / Y</span><span id="monitor-remaining" class="text-amber-300">—</span></div>
-          <div id="monitor-goal-result" class="mt-2 rounded bg-slate-900 p-2 text-slate-400">Task running</div>
-        </article>
-
-        <article class="monitoring-card space-y-1.5">
-          <h3 class="text-violet-300 font-bold border-b border-slate-800 pb-1">Formation & Health</h3>
-          <div class="monitoring-row"><span class="text-slate-500">Rigid-aligned RMS</span><span id="monitor-formation" class="text-emerald-300">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Indicator</span><span id="monitor-stability" class="text-emerald-300">GREEN · stable</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Max rod error</span><span id="monitor-rod-error" class="text-emerald-300">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Max node separation</span><span id="monitor-node-separation" class="text-slate-200">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Terrain clearance</span><span id="monitor-clearance" class="text-emerald-300">—</span></div>
-          <div id="monitor-warnings" class="mt-2 rounded bg-emerald-950/40 p-2 text-emerald-300">No structural warnings</div>
-        </article>
-
-        <article class="monitoring-card space-y-1.5">
-          <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
-            <h3 class="text-amber-300 font-bold">Cable Inspector</h3>
-            <select id="select-monitor-cable" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-cyan-300"></select>
-          </div>
-          <div class="monitoring-row"><span class="text-slate-500">Connected nodes</span><span id="cable-inspector-nodes">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Rest / current</span><span id="cable-inspector-lengths">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Δ length</span><span id="cable-inspector-delta">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Strain</span><span id="cable-inspector-strain">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Tension</span><span id="cable-inspector-force">—</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">State</span><span id="cable-inspector-state">—</span></div>
-          <div class="grid grid-cols-2 gap-1 pt-1 border-t border-slate-800 text-[10px]">
-            <span>Max / avg force</span><span id="monitor-force-summary" class="text-right">—</span>
-            <span>Max strain</span><span id="monitor-max-strain" class="text-right">—</span>
-            <span>Slack / overload</span><span id="monitor-cable-counts" class="text-right">—</span>
-          </div>
-        </article>
-
-        <article class="monitoring-card space-y-1.5">
-          <h3 class="text-rose-300 font-bold border-b border-slate-800 pb-1">Terrain Contacts</h3>
-          <div class="monitoring-row"><span class="text-slate-500">State</span><span id="monitor-grounded" class="text-slate-200">AIRBORNE</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Active contacts</span><span id="monitor-contact-count" class="text-orange-300">0</span></div>
-          <div class="monitoring-row"><span class="text-slate-500">Node / rod IDs</span><span id="monitor-contact-ids" class="text-orange-300">—</span></div>
-          <div id="monitor-contact-list" class="max-h-28 overflow-y-auto space-y-1 pt-1 border-t border-slate-800 text-[10px] text-slate-300">No active contacts</div>
-        </article>
-
-        <article class="monitoring-card learning-card space-y-2">
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
-            <div>
-              <h3 class="text-emerald-300 font-bold">GPS + Gradient Route Learner</h3>
-              <p class="text-[10px] text-slate-500 mt-0.5">Every win, timeout, or reset updates bounded route, speed, torque, and traction parameters for the next attempt.</p>
+                </div>
             </div>
-            <div class="flex gap-2">
-              <button id="btn-toggle-auto-learning" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Auto training: ON</button>
-              <button id="btn-clear-learning" class="px-2 py-1 rounded bg-slate-900 text-slate-300 border border-slate-700">Clear learned route</button>
+
+            <div class="monitoring-grid text-[11px] font-mono">
+                <article class="monitoring-card space-y-1.5">
+                    <h3 class="text-cyan-300 font-bold border-b border-slate-800 pb-1">Goal Tracking · A → B</h3>
+                    <div class="monitoring-row"><span class="text-slate-500">Start A</span><span id="monitor-start" class="text-slate-200">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Goal B</span><span id="monitor-goal" class="text-emerald-300">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">COM(t)</span><span id="monitor-com" class="text-white">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Goal error</span><span id="monitor-goal-error" class="text-cyan-300">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Remaining X / Y</span><span id="monitor-remaining" class="text-amber-300">—</span></div>
+                    <div id="monitor-goal-result" class="mt-2 rounded bg-slate-900 p-2 text-slate-400">Task running</div>
+                </article>
+
+                <article class="monitoring-card space-y-1.5">
+                    <h3 class="text-violet-300 font-bold border-b border-slate-800 pb-1">Formation & Health</h3>
+                    <div class="monitoring-row"><span class="text-slate-500">Rigid-aligned RMS</span><span id="monitor-formation" class="text-emerald-300">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Indicator</span><span id="monitor-stability" class="text-emerald-300">GREEN · stable</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Max rod error</span><span id="monitor-rod-error" class="text-emerald-300">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Max node separation</span><span id="monitor-node-separation" class="text-slate-200">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Terrain clearance</span><span id="monitor-clearance" class="text-emerald-300">—</span></div>
+                    <div id="monitor-warnings" class="mt-2 rounded bg-emerald-950/40 p-2 text-emerald-300">No structural warnings</div>
+                </article>
+
+                <article class="monitoring-card space-y-1.5">
+                    <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
+                        <h3 class="text-amber-300 font-bold">Cable Inspector</h3>
+                        <select id="select-monitor-cable" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-cyan-300"></select>
+                    </div>
+                    <div class="monitoring-row"><span class="text-slate-500">Connected nodes</span><span id="cable-inspector-nodes">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Rest / current</span><span id="cable-inspector-lengths">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Δ length</span><span id="cable-inspector-delta">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Strain</span><span id="cable-inspector-strain">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Tension</span><span id="cable-inspector-force">—</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">State</span><span id="cable-inspector-state">—</span></div>
+                    <div class="grid grid-cols-2 gap-1 pt-1 border-t border-slate-800 text-[10px]">
+                        <span>Max / avg force</span><span id="monitor-force-summary" class="text-right">—</span>
+                        <span>Run peak F / strain</span><span id="monitor-run-peaks" class="text-right">—</span>
+                        <span>Max strain</span><span id="monitor-max-strain" class="text-right">—</span>
+                        <span>Slack / overload</span><span id="monitor-cable-counts" class="text-right">—</span>
+                    </div>
+                </article>
+
+                <article class="monitoring-card space-y-1.5">
+                    <h3 class="text-rose-300 font-bold border-b border-slate-800 pb-1">Terrain Contacts</h3>
+                    <div class="monitoring-row"><span class="text-slate-500">State</span><span id="monitor-grounded" class="text-slate-200">AIRBORNE</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Active contacts</span><span id="monitor-contact-count" class="text-orange-300">0</span></div>
+                    <div class="monitoring-row"><span class="text-slate-500">Node / rod IDs</span><span id="monitor-contact-ids" class="text-orange-300">—</span></div>
+                    <div id="monitor-contact-list" class="max-h-28 overflow-y-auto space-y-1 pt-1 border-t border-slate-800 text-[10px] text-slate-300">No active contacts</div>
+                </article>
+
+                <article class="monitoring-card learning-card space-y-2">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                        <div>
+                            <h3 class="text-emerald-300 font-bold">GPS + Gradient Route Learner</h3>
+                            <p class="text-[10px] text-slate-500 mt-0.5">The next training attempt starts only after both Model A and Model B reach their goal positions.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="btn-toggle-auto-learning" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Auto training: ON</button>
+                            <button id="btn-clear-learning" class="px-2 py-1 rounded bg-slate-900 text-slate-300 border border-slate-700">Clear learned route</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-1">
+                        <div class="monitoring-row"><span class="text-slate-500">Current attempt</span><span id="learning-attempt">1</span></div>
+                        <div class="monitoring-row"><span class="text-slate-500">Win / loss record</span><span id="learning-record">0 W / 0 L</span></div>
+                        <div class="monitoring-row"><span class="text-slate-500">Best capability time</span><span id="learning-best" class="text-emerald-300">No completed win yet</span></div>
+                        <div class="monitoring-row"><span class="text-slate-500">Deadline</span><span class="text-amber-300">120.00 s</span></div>
+                        <div class="monitoring-row"><span class="text-slate-500">GPS segment</span><span id="learning-segment" class="text-cyan-300">S01 · waypoint x=0.00 m</span></div>
+                        <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Learned command</span><span id="learning-scales">1.000 speed · 1.000 torque · 1.000 grip</span></div>
+                        <div class="monitoring-row"><span class="text-slate-500">Last result</span><span id="learning-last-result">Waiting for first completed attempt</span></div>
+                        <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Last gradient</span><span id="learning-gradient" class="text-violet-300">Gradient update after win/loss</span></div>
+                    </div>
+                </article>
             </div>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-1">
-            <div class="monitoring-row"><span class="text-slate-500">Current attempt</span><span id="learning-attempt">1</span></div>
-            <div class="monitoring-row"><span class="text-slate-500">Win / loss record</span><span id="learning-record">0 W / 0 L</span></div>
-            <div class="monitoring-row"><span class="text-slate-500">Best capability time</span><span id="learning-best" class="text-emerald-300">No completed win yet</span></div>
-            <div class="monitoring-row"><span class="text-slate-500">Deadline</span><span class="text-amber-300">120.00 s</span></div>
-            <div class="monitoring-row"><span class="text-slate-500">GPS segment</span><span id="learning-segment" class="text-cyan-300">S01 · waypoint x=0.00 m</span></div>
-            <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Learned command</span><span id="learning-scales">1.000 speed · 1.000 torque · 1.000 grip</span></div>
-            <div class="monitoring-row"><span class="text-slate-500">Last result</span><span id="learning-last-result">Waiting for first completed attempt</span></div>
-            <div class="monitoring-row xl:col-span-2"><span class="text-slate-500">Last gradient</span><span id="learning-gradient" class="text-violet-300">Gradient update after win/loss</span></div>
-          </div>
-        </article>
-      </div>
 
-      <div class="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3 text-[10px]">
-        <span class="text-slate-500 mr-1">Export raw logs:</span>
-        <button data-monitor-export="goal_tracking" class="px-2 py-1 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">goal_tracking.csv</button>
-        <button data-monitor-export="formation_metrics" class="px-2 py-1 rounded bg-violet-950 text-violet-300 border border-violet-800">formation_metrics.csv</button>
-        <button data-monitor-export="cable_metrics" class="px-2 py-1 rounded bg-amber-950 text-amber-300 border border-amber-800">cable_metrics.csv</button>
-        <button data-monitor-export="contact_events" class="px-2 py-1 rounded bg-rose-950 text-rose-300 border border-rose-800">contact_events.csv</button>
-        <button data-monitor-export="complete_simulation_log" class="px-2 py-1 rounded bg-slate-800 text-slate-200 border border-slate-700">complete_simulation_log.csv</button>
-        <button id="btn-export-monitor-json" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">complete_log.json</button>
-        <span id="monitor-log-count" class="ml-auto text-slate-500 font-mono">0 raw samples</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- Synchronized monitoring charts -->
-  <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>Goal Tracking Error vs Time</span><span class="text-xs text-cyan-400 font-mono">||Goal − COM(t)|| [m]</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-goal-error"></canvas></div>
-    </div>
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>Formation Error vs Time</span><span class="text-xs text-violet-400 font-mono">Rigid-aligned RMS [m]</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-formation-error"></canvas></div>
-    </div>
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>Cable Length Change vs Time</span><span id="chart-cable-delta-label" class="text-xs text-amber-400 font-mono">C01 · ΔL [m]</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-cable-delta"></canvas></div>
-    </div>
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>Cable Force vs Time</span><span id="chart-cable-force-label" class="text-xs text-rose-400 font-mono">C01 · tension [N]</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-cable-force"></canvas></div>
-    </div>
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>Active Contact Count vs Time</span><span class="text-xs text-orange-400 font-mono">Nodes + rods</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-contact-count"></canvas></div>
-    </div>
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold"><span>COM Path · Top Down X–Y</span><span class="text-xs text-emerald-400 font-mono">Project Z axis is vertical</span></h3>
-      <div class="flex-1 relative"><canvas id="chart-com-path"></canvas></div>
-    </div>
-  </section>
-
-  <!-- Telemetry Charts Section -->
-  <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
-
-    <!-- Chart 1: Payload Core G-Force Isolation -->
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
-        <span>Central Payload Core G-Force Isolation</span>
-        <span class="text-xs text-emerald-400 font-mono">Core Acceleration (G-Force)</span>
-      </h3>
-      <div class="flex-1 relative">
-        <canvas id="chart-gforce"></canvas>
-      </div>
-    </div>
-
-    <!-- Chart 2: Deformable Ball Velocity & Deformation -->
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
-        <span>Sphere Deformation & Rolling Velocity</span>
-        <span class="text-xs text-cyan-400 font-mono">1 s Average · 20 s Window · Fixed Scale</span>
-      </h3>
-      <div class="flex-1 relative">
-        <canvas id="chart-velocity"></canvas>
-      </div>
-    </div>
-
-    <!-- Chart 3: Controller Objective and Constraint Health -->
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
-        <span>Controller Objective & Constraint Health</span>
-        <span class="text-xs text-violet-400 font-mono">LQR / iLQR / MPC Diagnostics</span>
-      </h3>
-      <div class="flex-1 relative"><canvas id="chart-control"></canvas></div>
-    </div>
-
-    <!-- Chart 4: Adaptive String Force Law -->
-    <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
-      <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
-        <span>Standard vs Adaptive Cable Force Law</span>
-        <span class="text-xs text-fuchsia-400 font-mono">Hermite Relaxation</span>
-      </h3>
-      <div class="flex-1 relative"><canvas id="chart-force-law"></canvas></div>
-    </div>
-
-  </section>
-
-  <!-- Controlled A-vs-B 50 m experiment -->
-  <section class="p-4 pt-0">
-    <div class="data-panel glass-panel rounded-2xl overflow-x-auto">
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div>
-          <h3 class="text-sm font-bold text-slate-200">Controlled A-vs-B · 50 m Measured Obstacle Course</h3>
-          <p class="text-[11px] text-slate-400 mt-1">10 irregular rock formations · start y=10 m · finish y=60 m · win before 120 s, otherwise loss · fixed 2 ms physics step</p>
+            <div class="flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3 text-[10px]">
+                <span class="text-slate-500 mr-1">Export raw logs:</span>
+                <button data-monitor-export="goal_tracking" class="px-2 py-1 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">goal_tracking.csv</button>
+                <button data-monitor-export="formation_metrics" class="px-2 py-1 rounded bg-violet-950 text-violet-300 border border-violet-800">formation_metrics.csv</button>
+                <button data-monitor-export="cable_metrics" class="px-2 py-1 rounded bg-amber-950 text-amber-300 border border-amber-800">cable_metrics.csv</button>
+                <button data-monitor-export="contact_events" class="px-2 py-1 rounded bg-rose-950 text-rose-300 border border-rose-800">contact_events.csv</button>
+                <button data-monitor-export="complete_simulation_log" class="px-2 py-1 rounded bg-slate-800 text-slate-200 border border-slate-700">complete_simulation_log.csv</button>
+                <button id="btn-export-monitor-json" class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">complete_log.json</button>
+                <span id="monitor-log-count" class="ml-auto text-slate-500 font-mono">0 raw samples</span>
+            </div>
         </div>
-        <div class="text-xs font-mono flex flex-wrap gap-3">
-          <span>Progress: <strong id="course-progress" class="text-emerald-400">0.0 / 50.0 m</strong></span>
-          <span>Obstacle: <strong id="course-current-obstacle" class="text-amber-400">none</strong></span>
-          <span>Crest checkpoints: <strong id="course-checkpoints" class="text-cyan-400">0 / 10</strong></span>
-          <span>Phase: <strong id="course-phase" class="text-cyan-400">course approach</strong></span>
+    </section>
+
+    <!-- Synchronized monitoring charts -->
+    <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Goal Tracking Error vs Time</span><span class="text-xs text-cyan-400 font-mono">||Goal − COM(t)|| [m]</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-goal-error"></canvas></div>
         </div>
-      </div>
-      <table class="data-table w-full text-left text-xs font-mono">
-        <thead class="bg-slate-900/80 text-slate-400 uppercase border-b border-slate-800">
-          <tr>
-            <th class="py-2.5 px-3">Model</th><th class="py-2.5 px-3">Measured path</th>
-            <th class="py-2.5 px-3">Completion</th><th class="py-2.5 px-3">Avg speed</th>
-            <th class="py-2.5 px-3">Speed variance</th><th class="py-2.5 px-3">Lateral travel</th>
-            <th class="py-2.5 px-3">Over</th><th class="py-2.5 px-3">Around</th>
-            <th class="py-2.5 px-3">Retries</th><th class="py-2.5 px-3">B violations</th>
-            <th class="py-2.5 px-3">Actuator energy</th><th class="py-2.5 px-3">Peak core G</th>
-          </tr>
-        </thead>
-        <tbody id="ab-comparison-body" class="text-slate-300"></tbody>
-      </table>
-    </div>
-  </section>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Formation Error vs Time</span><span class="text-xs text-violet-400 font-mono">Rigid-aligned RMS [m]</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-formation-error"></canvas></div>
+        </div>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Cable Length Change vs Time</span><span id="chart-cable-delta-label" class="text-xs text-amber-400 font-mono">C01 · ΔL [m]</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-cable-delta"></canvas></div>
+        </div>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Cable Force vs Time</span><span id="chart-cable-force-label" class="text-xs text-rose-400 font-mono">C01 · tension [N]</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-cable-force"></canvas></div>
+        </div>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Cable Force Distribution</span><span class="text-xs text-amber-400 font-mono">All 24 cables · live [N]</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-cable-bars"></canvas></div>
+        </div>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>Active Contact Count vs Time</span><span class="text-xs text-orange-400 font-mono">Nodes + rods</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-contact-count"></canvas></div>
+        </div>
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold"><span>COM Path · Top Down X–Y</span><span class="text-xs text-emerald-400 font-mono">Project Z axis is vertical</span></h3>
+            <div class="flex-1 relative"><canvas id="chart-com-path"></canvas></div>
+        </div>
+    </section>
 
-  <!-- 10 Locomotion Experiments Performance Metrics Matrix -->
-  <section class="p-4 pt-0">
-    <div class="data-panel glass-panel rounded-2xl overflow-x-auto">
-      <h3 class="section-title text-sm font-bold text-slate-200 mb-3 flex items-center justify-between">
-        <span>10 Locomotion Experiments Performance Metrics Matrix</span>
-        <span class="text-xs text-emerald-400 font-mono">Realtime 1x Empirical Benchmark</span>
-      </h3>
+    <!-- Telemetry Charts Section -->
+    <section class="chart-grid grid grid-cols-1 lg:grid-cols-2">
 
-      <table class="data-table w-full text-left text-xs">
-        <thead class="bg-slate-900/80 text-slate-400 uppercase font-mono border-b border-slate-800">
-          <tr>
-            <th class="py-2.5 px-3">Experiment / Level</th>
-            <th class="py-2.5 px-3">Distance</th>
-            <th class="py-2.5 px-3">Time</th>
-            <th class="py-2.5 px-3">Avg Speed</th>
-            <th class="py-2.5 px-3">Max G-Force</th>
-            <th class="py-2.5 px-3">Max Tension</th>
-            <th class="py-2.5 px-3">Deformation</th>
-            <th class="py-2.5 px-3">Obstacles</th>
-            <th class="py-2.5 px-3">Status</th>
-          </tr>
-        </thead>
-        <tbody id="experiments-table-body" class="divide-y divide-slate-800/50 text-slate-300 font-mono">
-          <!-- Populated dynamically by app.js -->
-        </tbody>
-      </table>
-    </div>
-  </section>
+        <!-- Chart 1: Payload Core G-Force Isolation -->
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+                <span>Central Payload Core G-Force Isolation</span>
+                <span class="text-xs text-emerald-400 font-mono">Core Acceleration (G-Force)</span>
+            </h3>
+            <div class="flex-1 relative">
+                <canvas id="chart-gforce"></canvas>
+            </div>
+        </div>
 
-  <!-- App Entry Point -->
-  <script type="module" src="./js/app.js?v=20260821-modela1"></script>
+        <!-- Chart 2: Deformable Ball Velocity & Deformation -->
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+                <span>Sphere Deformation & Rolling Velocity</span>
+                <span class="text-xs text-cyan-400 font-mono">1 s Average · 20 s Window · Fixed Scale</span>
+            </h3>
+            <div class="flex-1 relative">
+                <canvas id="chart-velocity"></canvas>
+            </div>
+        </div>
+
+        <!-- Chart 3: Controller Objective and Constraint Health -->
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+                <span>Controller Objective & Constraint Health</span>
+                <span class="text-xs text-violet-400 font-mono">LQR / iLQR / MPC Diagnostics</span>
+            </h3>
+            <div class="flex-1 relative"><canvas id="chart-control"></canvas></div>
+        </div>
+
+        <!-- Chart 4: Adaptive String Force Law -->
+        <div class="chart-card glass-panel p-4 rounded-2xl flex flex-col">
+            <h3 class="chart-title text-sm font-bold text-slate-200 mb-2 flex items-center justify-between">
+                <span>Standard vs Adaptive Cable Force Law</span>
+                <span class="text-xs text-fuchsia-400 font-mono">Hermite Relaxation</span>
+            </h3>
+            <div class="flex-1 relative"><canvas id="chart-force-law"></canvas></div>
+        </div>
+
+    </section>
+
+    <!-- Controlled A-vs-B 50 m experiment -->
+    <section class="p-4 pt-0">
+        <div class="data-panel glass-panel rounded-2xl overflow-x-auto">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-200">Controlled A-vs-B · 50 m Measured Obstacle Course</h3>
+                    <p class="text-[11px] text-slate-400 mt-1">10 irregular rock formations · start y=10 m · finish y=60 m · win before 120 s, otherwise loss · fixed 2 ms physics step</p>
+                </div>
+                <div class="text-xs font-mono flex flex-wrap gap-3">
+                    <span>Progress: <strong id="course-progress" class="text-emerald-400">0.0 / 50.0 m</strong></span>
+                    <span>Obstacle: <strong id="course-current-obstacle" class="text-amber-400">none</strong></span>
+                    <span>Crest checkpoints: <strong id="course-checkpoints" class="text-cyan-400">0 / 10</strong></span>
+                    <span>Phase: <strong id="course-phase" class="text-cyan-400">course approach</strong></span>
+                </div>
+            </div>
+            <table class="data-table w-full text-left text-xs font-mono">
+                <thead class="bg-slate-900/80 text-slate-400 uppercase border-b border-slate-800">
+                    <tr>
+                        <th class="py-2.5 px-3">Model</th>
+                        <th class="py-2.5 px-3">Measured path</th>
+                        <th class="py-2.5 px-3">Completion</th>
+                        <th class="py-2.5 px-3">Avg speed</th>
+                        <th class="py-2.5 px-3">Speed variance</th>
+                        <th class="py-2.5 px-3">Lateral travel</th>
+                        <th class="py-2.5 px-3">Over</th>
+                        <th class="py-2.5 px-3">Around</th>
+                        <th class="py-2.5 px-3">Retries</th>
+                        <th class="py-2.5 px-3">B violations</th>
+                        <th class="py-2.5 px-3">Actuator energy</th>
+                        <th class="py-2.5 px-3">Peak core G</th>
+                    </tr>
+                </thead>
+                <tbody id="ab-comparison-body" class="text-slate-300"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- 10 Locomotion Experiments Performance Metrics Matrix -->
+    <section class="p-4 pt-0">
+        <div class="data-panel glass-panel rounded-2xl overflow-x-auto">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h3 class="section-title text-sm font-bold text-slate-200 flex items-center justify-between">
+                    <span>10 Locomotion Experiments Performance Metrics Matrix</span>
+                    <span class="text-xs text-emerald-400 font-mono">Realtime 1x Empirical Benchmark</span>
+                </h3>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span id="records-total" class="text-[11px] text-slate-500 font-mono">0 all-time runs recorded</span>
+                    <button id="btn-clear-records" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-900/70 text-[10px] font-bold font-mono">Clear saved records</button>
+                </div>
+            </div>
+
+            <table class="data-table w-full text-left text-xs">
+                <thead class="bg-slate-900/80 text-slate-400 uppercase font-mono border-b border-slate-800">
+                    <tr>
+                        <th class="py-2.5 px-3">Experiment / Level</th>
+                        <th class="py-2.5 px-3">Distance</th>
+                        <th class="py-2.5 px-3">Time</th>
+                        <th class="py-2.5 px-3">Avg Speed</th>
+                        <th class="py-2.5 px-3">Max G-Force</th>
+                        <th class="py-2.5 px-3">Max Tension</th>
+                        <th class="py-2.5 px-3">Deformation</th>
+                        <th class="py-2.5 px-3">Obstacles</th>
+                        <th class="py-2.5 px-3">Status</th>
+                        <th class="py-2.5 px-3 text-emerald-500/90">Best Run · All-Time</th>
+                        <th class="py-2.5 px-3 text-rose-500/90">Worst Run · All-Time</th>
+                    </tr>
+                </thead>
+                <tbody id="experiments-table-body" class="divide-y divide-slate-800/50 text-slate-300 font-mono">
+                    <!-- Populated dynamically by app.js -->
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- App Entry Point -->
+    <script type="module" src="./js/app.js?v=20260822-sun1"></script>
 
 </body>
+
 </html>

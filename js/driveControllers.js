@@ -6,7 +6,17 @@
  * six-bar topology: destination tracking, payload-height regulation,
  * receding-horizon prediction, bounded disturbances, input-change penalties,
  * and hard cable/rod actuator constraints.
+ *
+ * The four *_true modes delegate their command generation to genuine ported
+ * solvers in ./advancedControllers.js (Riccati LQR, iLQR, adversarial minimax
+ * iLQR, projected-gradient QP-MPC).
  */
+
+import {
+  ADVANCED_CONTROLLER_LABELS,
+  ADVANCED_MODES,
+  solveAdvancedController
+} from './advancedControllers.js?v=20260822-grip1';
 
 export const CONTROLLER_LABELS = {
   cpg: 'CPG Baseline',
@@ -17,7 +27,8 @@ export const CONTROLLER_LABELS = {
   ilqr_minimax_penalty: 'iLQR Minimax + Input Penalty',
   qp_mpc: 'QP-MPC Constrained',
   qp_mpc_payload: 'QP-MPC + Payload Stabilization',
-  neural: 'Neural Geometry Policy'
+  neural: 'Neural Geometry Policy',
+  ...ADVANCED_CONTROLLER_LABELS
 };
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
@@ -118,6 +129,26 @@ function getProfile(mode) {
       trackingGain: 0.88, phaseGain: 0.16, speedGain: 0.52,
       cablePenalty: 0.36, inputPenalty: 0.28, payloadWeight: 0.30,
       momentumBlend: 0.15, robustGain: 0.12, obstacleGain: 0.42, horizonScale: 0.82
+    },
+    riccati_lqr: {
+      trackingGain: 0.84, phaseGain: 0.10, speedGain: 0.58,
+      cablePenalty: 0.48, inputPenalty: 0.20, payloadWeight: 0.15,
+      momentumBlend: 0, robustGain: 0.05, obstacleGain: 0.28, horizonScale: 0.75
+    },
+    ilqr_true: {
+      trackingGain: 1.02, phaseGain: 0.24, speedGain: 0.64,
+      cablePenalty: 0.32, inputPenalty: 0.34, payloadWeight: 0.55,
+      momentumBlend: 0.22, robustGain: 0.10, obstacleGain: 0.40, horizonScale: 1.00
+    },
+    ilqr_minimax_true: {
+      trackingGain: 0.94, phaseGain: 0.20, speedGain: 0.58,
+      cablePenalty: 0.44, inputPenalty: 0.44, payloadWeight: 0.66,
+      momentumBlend: 0.18, robustGain: 0.50, obstacleGain: 0.56, horizonScale: 1.05
+    },
+    qp_mpc_proj: {
+      trackingGain: 0.92, phaseGain: 0.08, speedGain: 0.60,
+      cablePenalty: 0.66, inputPenalty: 0.62, payloadWeight: 0.38,
+      momentumBlend: 0.12, robustGain: 0.22, obstacleGain: 0.54, horizonScale: 1.25
     }
   };
   return profiles[mode] || profiles.ilqr_minimax_penalty;
@@ -161,6 +192,41 @@ export function computeDriveControllerTargets(args) {
     (obstacle?.detected ? Math.max(0, obstacle.height) : 0)
   );
 
+  // Advanced Drive-ported solvers generate the global normalized command;
+  // the per-cable shaping below distributes it across the tensegrity cage.
+  let advancedSolution = null;
+  if (ADVANCED_MODES.has(requestedMode)) {
+    const previousMeanCommand = previousCableTargets.length
+      ? clamp(
+        previousCableTargets.reduce((sum, value) => sum+value, 0) /
+        Math.max(previousCableTargets.length*amplitude, 1e-6), -1, 1)
+      : 0;
+    try {
+      advancedSolution = solveAdvancedController(requestedMode, {
+        state0: [planarSpeed, sensedCentroid[2]-(cfg.payloadTargetHeight || 0.55)],
+        referenceSpeed: cfg.targetSpeed || 0.5,
+        disturbance: clamp(
+          Math.abs(sensorNoise[0])+Math.abs(sensorNoise[1])+
+          (obstacle?.detected ? Math.max(0, obstacle.height)*0.6 : 0), 0, 1),
+        previousCommand: previousMeanCommand,
+        horizon: clamp(Math.round((cfg.controlHorizon || 12)*profile.horizonScale), 6, 18),
+        weights: {
+          qv: 6.0, qh: 4.0,
+          r: 0.5+profile.inputPenalty*8,
+          rd: profile.inputPenalty*4,
+          qvT: 10.0, qhT: 6.0
+        },
+        params: {
+          thrust: 1.35, drag: 0.95, gradeLoss: 0.85,
+          heightRelax: 2.2, rollCoupling: 0.10,
+          dtH: Math.max(0.04, cfg.controllerDt || 0.08)*profile.horizonScale
+        }
+      });
+    } catch {
+      advancedSolution = null; // fall back to the analytic profile below
+    }
+  }
+
   const cableTargets = new Array(rover.outerStrings.length).fill(0);
   let effort = 0;
   let cableDeviationCost = 0;
@@ -179,7 +245,12 @@ export function computeDriveControllerTargets(args) {
     const cableDeviation = currentCableOffsets[s] / Math.max(rover.l0_outerStrings[s], 1e-6);
 
     let normalizedCommand;
-    if (requestedMode === 'neural') {
+    if (advancedSolution) {
+      const rollingShape = Math.tanh(2.4*front)*(0.82-0.28*vertical);
+      const phaseWave = Math.sin(gaitPhase+bodyPhase);
+      normalizedCommand = advancedSolution.command*rollingShape +
+        profile.phaseGain*phaseWave-profile.cablePenalty*cableDeviation;
+    } else if (requestedMode === 'neural') {
       normalizedCommand = neuralCablePolicy(front, side, vertical, gaitPhase+bodyPhase, speedError, cableDeviation);
     } else {
       const rollingShape = Math.tanh(2.4*front) * (0.82 - 0.28*vertical);
@@ -233,9 +304,11 @@ export function computeDriveControllerTargets(args) {
 
   const target = cfg.targetDestination || [0, cfg.targetGoalY || 25];
   const destinationError = Math.hypot(target[0]-centroid[0], target[1]-centroid[1]);
-  const controlCost = destinationError*0.08 + speedError*speedError*2.0 +
-    cableDeviationCost*profile.cablePenalty + effort*(1+6*profile.inputPenalty) +
-    disturbanceEstimate*disturbanceEstimate;
+  const controlCost = advancedSolution
+    ? advancedSolution.cost+destinationError*0.08
+    : destinationError*0.08 + speedError*speedError*2.0 +
+      cableDeviationCost*profile.cablePenalty + effort*(1+6*profile.inputPenalty) +
+      disturbanceEstimate*disturbanceEstimate;
 
   const horizon = Math.max(2, Math.round(cfg.controlHorizon || 12));
   const horizonDt = Math.max(0.04, cfg.controllerDt || 0.08) * profile.horizonScale;
@@ -261,9 +334,13 @@ export function computeDriveControllerTargets(args) {
       controlCost: Number.isFinite(controlCost) ? controlCost : 0,
       activeCableCount,
       activeRodCount,
-      disturbanceEstimate,
+      disturbanceEstimate: advancedSolution?.disturbanceEstimate ?? disturbanceEstimate,
       horizon,
-      neuralFallback: requestedMode === 'neural'
+      neuralFallback: requestedMode === 'neural',
+      solverIterations: advancedSolution?.iterations ?? 0,
+      solverConverged: advancedSolution?.converged ?? false,
+      solverWorstCaseCost: advancedSolution?.worstCaseCost ?? null,
+      solverMs: advancedSolution?.solveMs ?? null
     }
   };
 }
