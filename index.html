@@ -752,6 +752,46 @@
                 </div>
             </div>
 
+            <!-- Automated Benchmark & Hybrid Synth Card -->
+            <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-fuchsia-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-fuchsia-400"></span> 14x14 Benchmark Engine
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">Headless 500Hz</span>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                    Evaluates all controllers on all 14 terrains to score composite performance (CPS) and rank the best.
+                </p>
+                <button id="btn-run-benchmark" class="w-full py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold text-xs transition shadow-md shadow-fuchsia-500/20">
+          Run All Controllers × All Terrains Benchmark
+        </button>
+                <div id="benchmark-status" class="text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800 space-y-1">
+                    <div>Progress: <span id="benchmark-progress" class="text-fuchsia-400 font-bold">Idle</span></div>
+                    <div>Leader: <span id="benchmark-leader" class="text-emerald-400 font-bold">N/A</span></div>
+                </div>
+            </div>
+
+            <!-- Automated Benchmark & Hybrid Synth Card -->
+            <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-fuchsia-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-fuchsia-400"></span> 14x14 Benchmark Engine
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">Headless 500Hz</span>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-tight">
+                    Evaluates all controllers on all 14 terrains to score composite performance (CPS) and rank the best.
+                </p>
+                <button id="btn-run-benchmark" class="w-full py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold text-xs transition shadow-md shadow-fuchsia-500/20">
+          Run All Controllers × All Terrains Benchmark
+        </button>
+                <div id="benchmark-status" class="text-[11px] font-mono text-slate-300 pt-1 border-t border-slate-800 space-y-1">
+                    <div>Progress: <span id="benchmark-progress" class="text-fuchsia-400 font-bold">Idle</span></div>
+                    <div>Leader: <span id="benchmark-leader" class="text-emerald-400 font-bold">N/A</span></div>
+                </div>
+            </div>
+
         </div>
     </main>
 
@@ -1011,6 +1051,7 @@
 
     <!-- App Entry Point -->
     <script type="module" src="./js/app.js?v=20260822-sun1"></script>
+    <script type="module" src="./js/masterHybridBenchmark.js"></script>
 
 </body>
 

@@ -2703,9 +2703,11 @@ export class Simulation {
     let l0 = base_l0 - actuationOffset;
     l0 = Math.max(l_min, Math.min(l_max, l0));
 
+    // Model B ('adaptive') always uses relaxation; Model A ('fixed') respects
+    // the user's RELAXATION toggle instead of forcing it off.
     const relaxationCfg = this.modelType === 'adaptive'
-      ? this.cfg
-      : Object.assign({}, this.cfg, { stringRelaxation: false });
+      ? Object.assign({}, this.cfg, { stringRelaxation: true })
+      : this.cfg;
     const relaxedResult = relaxedCableTension(ell, l0, base_l0, relaxationCfg);
     this.relaxedCableFlags[idx] = relaxedResult.relaxed;
     if (relaxedResult.tension <= 0) return 0.0;
