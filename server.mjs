@@ -79,6 +79,14 @@ async function handleApi(req, res, pathname) {
     }
     if (req.method === 'DELETE') {
       if (req.headers['x-confirm'] !== 'clear') return send(res, 400, { error: 'missing X-Confirm: clear' });
+      // Wiping the disk file is only allowed from this machine: requests
+      // relayed by a tunnel/proxy (cloudflared, nginx, ...) carry forwarding
+      // headers. Set ALLOW_REMOTE_CLEAR=1 to permit it anyway.
+      const relayed = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'];
+      const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+      if ((relayed || !local) && process.env.ALLOW_REMOTE_CLEAR !== '1') {
+        return send(res, 403, { error: 'clearing the disk records is only allowed from the local machine' });
+      }
       const result = await store.clear();
       return send(res, 200, { state: result.state, persisted: result.persisted, reason: result.reason || null });
     }
