@@ -349,7 +349,8 @@ export class RealtimeMonitor {
       remainingX,
       remainingY,
       gravity: gravityMagnitude,
-      weightForce: (12*(this.config.nodeMass ?? 0.2)
+      // Whole rover: 12 node masses + 6 bars + payload core (cables are massless).
+      weightForce: (12*(this.config.nodeMass ?? 0.2)+6*(this.config.strutMass ?? 0.3)
         +(this.config.coreMass ?? 1.6))*gravityMagnitude,
       goalThreshold: this.settings.goalThreshold,
       goalReached: this.goalReached,
