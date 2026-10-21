@@ -314,7 +314,13 @@ export class RealtimeMonitor {
     const warnings = [];
     if (rodHealth.maximumLengthError > this.settings.rodLengthWarning) warnings.push('ROD LENGTH');
     if (rodHealth.intersections > 0) warnings.push('ROD INTERSECTION');
-    if (terrainClearance < -this.settings.penetrationWarning) warnings.push('TERRAIN PENETRATION');
+    // With the passive penalty contact (DAE core) a few millimetres of node
+    // penetration ARE the contact force law (static depth ~ (W/k)^(2/3));
+    // only penetration well beyond that indicates a fault.
+    const passive = this.config.contactModel === 'passive' ||
+      ((this.config.contactModel || 'auto') === 'auto' && this.config.physicsCore === 'dae');
+    const penetrationLimit = passive ? Math.max(this.settings.penetrationWarning, 0.02) : this.settings.penetrationWarning;
+    if (terrainClearance < -penetrationLimit) warnings.push('TERRAIN PENETRATION');
     if (maximumCableStrain >= this.settings.cableMaximumStrainPercent) warnings.push('CABLE STRAIN');
     if (overloadedCableCount) warnings.push('CABLE OVERLOAD');
     if (maximumNodeSeparation > this.settings.maximumNodeSeparationRatio*2*this.rover.R_outer) warnings.push('NODE SEPARATION');

@@ -16,7 +16,7 @@ import {
   ADVANCED_CONTROLLER_LABELS,
   ADVANCED_MODES,
   solveAdvancedController
-} from './advancedControllers.js?v=20260822-grip1';
+} from './advancedControllers.js?v=20261021-ws1';
 
 export const CONTROLLER_LABELS = {
   cpg: 'CPG Baseline',

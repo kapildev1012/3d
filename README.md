@@ -31,10 +31,48 @@ Level 14 expands to a true 1000 m × 1000 m Martian field centred on the origin 
 ## Run
 
 ```bash
-npm run dev
+npm start            # node server.mjs → http://127.0.0.1:3100/  (PORT, HOST env respected; binds 0.0.0.0)
+npm run build        # checks every module/import/asset, writes the static site to dist/
+npm run preview      # serves dist/ with the same API
+npm test             # full test suite (npm run verify = build + tests)
 ```
 
-Open `http://127.0.0.1:3000/`.
+No dependencies to install (Node ≥ 18). Use `npm start` rather than a plain static server: it also provides the
+benchmark API that stores records on disk.
+
+## Workstation layout
+
+- **Toolbar**: transport (Play/Pause · Step 0.1 s · Reset · speed up to 10×), mission clock with real-time factor,
+  record-storage status, *Copy link*; second row: Level, Gait, Controller, Physics, Actuation, Gravity, Research preset.
+- **Viewport (≈68 %)** with camera/overlay controls in its header and a docked Model A vs Model B telemetry strip
+  underneath, so nothing covers the rover.
+- **Inspector (≈32 %)**: Parameters (every slider has a typed numeric input), Gait, Experiment, Physics audit, Tools.
+- **Dock**: Benchmark matrix (14 levels) · Live mission & structural telemetry · Analytical figures (Figs 1–13, category
+  filters, dark on screen, *Paper export* = white IEEE PDF/SVG/600-dpi PNG) · Paper benchmark; *Show all* stacks them.
+- **Shareable URLs**: `?level=6&controller=sgt_tipping&core=dae&act=pure&g=3.721&speed=2&cam=top` opens that exact setup.
+
+## Benchmark records (never lost)
+
+Every run is recorded continuously: a checkpoint every 1.0 s of simulated time, and a final record when the mission is
+completed or failed (deadline, level time limit, 30 s stall) or the user resets, pauses (checkpoint), switches
+level/controller/physics/preset, or closes the tab. Runs shorter than 0.5 s and 1 cm are ignored.
+
+| Layer | Where | Survives |
+| --- | --- | --- |
+| localStorage `tensegrity_benchmarks_v2` + IndexedDB | browser | refresh, new tab, reboot |
+| `data/benchmarks.json` via `/api/benchmarks` (atomic writes) | local server disk | clearing browser data, other browsers, reboot |
+| `public/default_benchmarks.json` | seed (14 headless 20 s baseline runs, labelled SEED) | loaded only into an empty store |
+
+All layers merge by run id (newest copy wins); *Clear saved records* writes a tombstone so no layer can resurrect cleared
+runs. Export/Import JSON and CSV are in the matrix header; each level's history drawer exports that level alone. On
+read-only hosting (Vercel) the API reports `persisted: false` and records live in the visitor's browser.
+
+*Run all 14 levels* steps Levels 1→14 headless (10–60 s each), records every run and shows a downloadable report.
+Regenerate the seed with `npm run seed`.
+
+## Deploy
+
+`npx vercel --prod` (uses `vercel.json`: `npm run build` → `dist/`, plus the `api/benchmarks.js` function).
 
 ## Real-time monitoring
 
@@ -53,6 +91,26 @@ The adaptive rover records and displays:
 The central thresholds and logging settings are in `MONITORING_DEFAULTS` in `js/monitoringSystem.js` and can be overridden through `SimConfig({ monitoring: { ... } })`.
 
 The dashboard exports `goal_tracking.csv`, `formation_metrics.csv`, `cable_metrics.csv`, `contact_events.csv`, `complete_simulation_log.csv`, and a complete JSON log. Raw export samples are retained at the physics timestep; graph smoothing does not alter exported values.
+
+## Research mode (paper)
+
+The simulator contains a second, physically audited mode used for the paper in `paper/`:
+
+- **Lagrangian DAE core** (`js/lagrangianDae.js`): non-minimal Cartesian coordinates, consistent rigid-bar mass matrix, exact bar-length multipliers and the minimum-norm constraint + energy corrector (Algorithm 1).
+- **Passive Hunt–Crossley contact** with its elastic potential in the energy, regularized Coulomb friction, no clamps or impulses.
+- **Work ledger**: every force category and projection is booked; the residual ε = E − E₀ − ΣW and the aid share are shown in the *Physics audit* tab.
+- **SGT gait** (`js/tippingController.js`): Sensitivity-Gradient Tipping, cable-only rolling from the pinned quasi-static KKT sensitivity of the centre of mass.
+
+In the app, press **Research preset** (or choose Physics = *Lagrangian DAE* and Actuation = *Cable only*). The default game mode keeps the original engine with its locomotion aids, which the audit reports as non-physical work.
+
+| Command | What it does |
+| --- | --- |
+| `npm run test:research` | DAE, corrector, ledger, SGT, schema and LaTeX tests |
+| `npm run experiments` | full protocol: 6 methods, 10 scenarios, 7 ablations, 3 terrains (114 runs, resumable, `results/paper/runs/`) |
+| `npm run paper:data` | `results/paper/tables.tex`, `numbers.tex`, figures (PDF/SVG/600-dpi PNG) |
+| `npm run paper:pdf` | builds `paper/main.pdf` (needs LaTeX; IEEEtran is bundled) |
+
+The *Comparative benchmark* panel runs the same protocol in the browser and has **Copy LaTeX benchmark table**. Every figure window has **Export for IEEE** (SVG, PDF, 600-dpi PNG at 3.5 in or 7.16 in).
 
 ## Verify
 

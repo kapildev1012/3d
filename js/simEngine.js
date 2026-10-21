@@ -2,16 +2,18 @@ import {
   ADVANCED_CONTROLLER_LABELS,
   ADVANCED_MODES,
   solveAdvancedController
-} from './advancedControllers.js?v=20260822-grip1';
-import { relaxedCableTension } from './driveControllers.js?v=20260822-grip1';
+} from './advancedControllers.js?v=20261021-ws1';
+import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
 import {
   createABCourse,
   evaluateCourseObstacle,
   senseCourseObstacle,
   obstacleActuation,
   ObstaclePassTracker
-} from './abExperiment.js?v=20260822-grip1';
-import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20260822-grip1';
+} from './abExperiment.js?v=20261021-ws1';
+import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20261021-ws1';
+import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261021-ws1';
+import { SensitivityTippingController } from './tippingController.js?v=20261021-ws1';
 
 export const LEVEL10_PERFORMANCE = Object.freeze({
   targetSpeed: 1.30,
@@ -193,6 +195,57 @@ export class SimConfig {
     // Current Active Experiment
     this.experimentId = 1;
 
+    // Physics core. 'dae' integrates the shell with the non-minimal Cartesian
+    // Lagrangian DAE of tensegrityDynamicspreprint.pdf (consistent rigid-bar
+    // inertia, exact bar-length constraints through Lagrange multipliers and
+    // the Algorithm-1 constraint/energy corrector). 'legacy' keeps the
+    // original lumped-mass semi-implicit Euler + SHAKE projection.
+    // Default stays 'legacy' so the interactive game levels and their
+    // regression tests keep their tuned behaviour; the paper's research mode
+    // (applyResearchProfile / "Research preset" button) selects 'dae'.
+    this.physicsCore = 'legacy';
+    this.daeEnergyCorrection = true;  // energy row of Algorithm 1 (Eq. 56)
+    this.daeGamma = 1e-10;            // Algorithm 1 tolerance gamma
+    this.daeEnergyGamma = 1e-9;       // energy-row tolerance [J]
+    this.daeMaxIterations = 10;
+    this.strutRadius = 0.012;         // rigid-bar radius for transverse inertia [m]
+
+    // Work ledger: every force and every projection is booked as work so that
+    // E(t) - E(0) - sum(W) exposes pure numerical energy error.
+    this.energyLedger = true;
+
+    // Physically admissible actuation only. When true the simulator removes
+    // every external locomotion aid (roll couple, traction pull, grip velocity
+    // solve, lateral corridor teleport, anti-spin damping, virtual obstacle
+    // field) and friction is limited by the actual contact normal force.
+    // Locomotion must then come from cable rest-length changes alone.
+    this.pureCableActuation = false;
+
+    // Ground contact model. 'legacy': penalty spring + node position clamp +
+    // restitution impulse (game behaviour). 'passive': Hunt-Crossley normal
+    // force F = k p^1.5 (1 + alpha pdot) whose spring part derives from the
+    // potential V_c = 2/5 k p^2.5 (included in the energy), plus regularized
+    // Coulomb friction bounded by the actual normal force. Every
+    // non-conservative contact term then satisfies F.v <= 0 (passivity).
+    // 'auto' selects 'passive' for the DAE core and 'legacy' otherwise.
+    this.contactModel = 'auto';
+
+    // Robustness / stress-test hooks (all neutral by default).
+    // Sensor noise corrupts only what the controller SEES (positions,
+    // velocities, payload state); the physics state is never altered.
+    this.sensorNoise = { model: 'none', sigmaQ: 0.005, sigmaV: 0.02, outlierRate: 0.02, outlierScale: 10 };
+    this.actuatorDelay = 0.0;          // controller -> actuator latency [s]
+    // External disturbance on the shell: null or
+    // { type: 'impulse'|'step', time [s], duration [s], force: [Fx, Fy, Fz] [N] }
+    this.disturbance = null;
+    // Plant/model mismatch: the controller keeps the nominal values while
+    // the simulated plant uses these scales.
+    this.plantStiffnessScale = 1.0;    // outer-cable elastic tension
+    this.plantFrictionScale = 1.0;     // ground friction coefficient
+    this.plantPayloadMassScale = 1.0;  // payload core mass
+    this.contactDampingAlpha = 1.5;   // Hunt-Crossley alpha [s/m]
+    this.frictionRegularization = 0.02; // Coulomb smoothing speed [m/s]
+
     const monitoringOverrides = overrides.monitoring || {};
     Object.assign(this, overrides);
     this.monitoring = mergeMonitoringSettings(monitoringOverrides);
@@ -200,6 +253,28 @@ export class SimConfig {
 
   applyLevel10PerformanceProfile() {
     Object.assign(this, LEVEL10_PERFORMANCE, { T_end: LEVEL10_PERFORMANCE.timeLimit });
+    return this;
+  }
+
+  /**
+   * Research profile used for the paper experiments: Lagrangian DAE core with
+   * Algorithm 1, passive Hunt-Crossley contact, cable-only actuation and the
+   * Sensitivity-Gradient Tipping gait. Stroke limits are 30 % of the outer
+   * cable rest length (0.49 m) and 32 % of the payload cable rest length;
+   * spool speed 0.20 m/s.
+   */
+  applyResearchProfile() {
+    Object.assign(this, {
+      physicsCore: 'dae',
+      contactModel: 'passive',
+      daeEnergyCorrection: true,
+      pureCableActuation: true,
+      controllerMode: 'sgt_tipping',
+      actuationDeltaL: 0.15,
+      coreActuationDeltaL: 0.15,
+      cableLinearVelocity: 0.20,
+      coreCableLinearVelocity: 0.20
+    });
     return this;
   }
 
@@ -507,6 +582,7 @@ export class TerrainModel {
   }
 
   generateSurface() {
+    this.evalCache = new Map();
     const rng = createRNG(this.cfg.seed);
     const lvl = this.cfg.terrainLevel;
     this.rocks = [];
@@ -548,7 +624,8 @@ export class TerrainModel {
       this.craters.push({ x: 0.0, y: 6.0, r: 2.0, depth: 0.60 });
     } else if (lvl === 6) {
       this.rmsScale = Math.max(0.06, this.cfg.groundRMS);
-      this.slopes.push({ yStart: 2.0, yEnd: 16.0, incline: 0.25 });
+      // 18° as the level name states (was 0.25 = 14.0°).
+      this.slopes.push({ yStart: 2.0, yEnd: 16.0, incline: Math.tan(18*Math.PI/180) });
     } else if (lvl === 7) {
       this.rmsScale = Math.max(0.10, this.cfg.groundRMS);
       for (let i = 0; i < 12; i++) {
@@ -1219,7 +1296,39 @@ export class TerrainModel {
     return this.scatterQuery(x, y, this.maxRockReach, includeBPath);
   }
 
+  /**
+   * Exact memoization of terrain queries. A physics step evaluates the same
+   * node positions many times (contact, projections, clearance reports,
+   * energy ledger, monitoring); the terrain is static between
+   * generateSurface() calls, so caching on the exact (x, y, model) key is
+   * bit-for-bit identical and removes ~3/4 of the step cost.
+   */
   eval(x, y, modelType = 'fixed') {
+    // Invalidate if any terrain feature collection or scale was replaced
+    // since the cache was filled (e.g. a level edit or a test swapping the
+    // obstacle chain); a stale height would be a silent physics error.
+    const sig = this.evalCacheSignature;
+    if (!sig || sig[0] !== this.expeditionObstacles || sig[1] !== this.rocks || sig[2] !== this.craters
+      || sig[3] !== this.slopes || sig[4] !== this.marshes || sig[5] !== this.mountains || sig[6] !== this.valleys
+      || sig[7] !== this.sandPatches || sig[8] !== this.course || sig[9] !== this.modes || sig[10] !== this.rmsScale
+      || sig[11] !== this.cfg.groundRMS || sig[12] !== this.cfg.terrainLevel || sig[13] !== this.scatterList
+      || sig[14] !== this.bPathRocks || sig[15] !== this.courseGritRocks) {
+      this.evalCache = new Map();
+      this.evalCacheSignature = [this.expeditionObstacles, this.rocks, this.craters, this.slopes, this.marshes,
+        this.mountains, this.valleys, this.sandPatches, this.course, this.modes, this.rmsScale,
+        this.cfg.groundRMS, this.cfg.terrainLevel, this.scatterList, this.bPathRocks, this.courseGritRocks];
+    }
+    const cache = this.evalCache;
+    const key = modelType === 'adaptive' ? `a${x},${y}` : `${x},${y}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const value = this.evalUncached(x, y, modelType);
+    if (cache.size > 50000) cache.clear();
+    cache.set(key, Object.freeze(value));
+    return value;
+  }
+
+  evalUncached(x, y, modelType = 'fixed') {
     const surface = this.evalBase(x, y, modelType);
     let { h, dhdx, dhdy } = surface;
     for (const obstacle of this.course?.obstacles || []) {
@@ -1689,6 +1798,48 @@ export class SphericalRoverModel {
   }
 }
 
+export const LEDGER_CATEGORIES = Object.freeze([
+  'cables', 'core', 'contact', 'drag', 'rodPenalty', 'constraint',
+  'assist', 'virtual', 'disturbance', 'corrector', 'parameter'
+]);
+
+/** Cumulative work ledger [J]; see Simulation.bookLedger(). */
+export function createWorkLedger() {
+  const work = {};
+  for (const category of LEDGER_CATEGORIES) work[category] = 0;
+  return {
+    work,
+    E0: 0,
+    E: 0,
+    residual: 0,
+    maxAbsResidual: 0,
+    // Per-step drift: energy change of the step that no booked work explains,
+    // measured BEFORE the corrector's energy row removes it. With the energy
+    // row active the residual is ~0 by construction, so these are the
+    // admissibility bound: any unbooked source is <= maxStepDrift per step.
+    stepDrift: 0,
+    maxStepDrift: 0,
+    driftAbs: 0,
+    driftSigned: 0,
+    correctorIterations: 0,
+    maxCorrectorIterations: 0,
+    lastGravity: null
+  };
+}
+
+/**
+ * Share of the energy input that came from non-physical
+ * aids (roll couple, traction pull, grip velocity solve, corridor teleport,
+ * virtual obstacle field, anti-spin) rather than from the cable actuators
+ * (sum of tension x |rest-length change|). 0 = cable-powered locomotion.
+ */
+export function assistEnergyShare(work, actuatorEnergy = 0) {
+  const aid = Math.max(0, work.assist)+Math.max(0, work.virtual);
+  const admissible = Math.max(0, actuatorEnergy);
+  const total = aid+admissible;
+  return total > 1e-12 ? aid/total : 0;
+}
+
 export class Simulation {
   constructor(cfg, rover, terrain, modelType = 'fixed', routeLearner = null) {
     this.cfg = cfg;
@@ -1750,6 +1901,23 @@ export class Simulation {
     this.supportChangeTicks = 0;
     this.completedRolls = 0;
     this.dynamicNodeMass = this.cfg.nodeMass + 0.5*this.cfg.strutMass;
+    this.sgt = null;
+    this.plantCoreMass = this.cfg.coreMass*(this.cfg.plantPayloadMassScale ?? 1);
+    this.commandQueue = [];
+    this.pendingImpulse = null;
+    this.controllerTiming = { count: 0, totalMs: 0, maxMs: 0 };
+    this.dae = new ShellDAE({
+      nNodes: n,
+      bars: this.rover.bars,
+      barLengths: this.rover.l0_bars,
+      barMass: this.cfg.strutMass,
+      barRadius: this.cfg.strutRadius ?? 0.012,
+      nodeMass: this.cfg.nodeMass,
+      gravity: this.cfg.gravity
+    });
+    this.ledger = createWorkLedger();
+    this.ledger.E0 = this.ledgerEnergy();
+    this.ledger.E = this.ledger.E0;
     this.prevCvx = 0.0;
     this.prevCvy = 0.0;
     this.prevCvz = 0.0;
@@ -1872,7 +2040,14 @@ export class Simulation {
       relaxationFraction: [],
       slipSpeed: [],
       kineticEnergy: [],
-      rollingRatio: []
+      rollingRatio: [],
+      energyResidual: [],
+      constraintWork: [],
+      assistWork: [],
+      cableWork: [],
+      contactWork: [],
+      dragWork: [],
+      totalEnergy: []
     };
 
     this.currentDiag = {
@@ -2262,6 +2437,45 @@ export class Simulation {
     });
     const desiredDirection = this.desiredDirectionForMode(centroid, obstacle, velocity, this.learningCommand);
 
+    // Sensitivity-Gradient Tipping: physically admissible cable-only gait.
+    if (this.modelType === 'adaptive' && cfg.controllerMode === 'sgt_tipping') {
+      if (!this.sgt) this.sgt = new SensitivityTippingController(this, cfg.sgtOptions || {});
+      const command = this.sgt.update(centroid, velocity, omega, desiredDirection);
+      this.locomotionState = command.state;
+      this.completedRolls = this.sgt.tipCount;
+      this.supportFace = command.geometry?.face || [];
+      this.targetEdge = command.geometry?.edge || [];
+      this.comMargin = this.sgt.lastPlan?.margin ?? Infinity;
+      this.contractingCableIndices = this.sgt.lastPlan?.activeCables || [];
+      this.relaxingCableIndices = [];
+      return {
+        cableTargets: command.cableTargets,
+        coreTargets: command.coreTargets,
+        rodTargets: new Array(this.rover.bars.length).fill(0),
+        diagnostics: {
+          mode: 'sgt_tipping',
+          modeLabel: 'SGT · sensitivity-gradient tipping (cable-only)',
+          desiredDirection,
+          predictedPath: [[centroid[0], centroid[1], centroid[2]],
+            [centroid[0]+desiredDirection[0], centroid[1]+desiredDirection[1], centroid[2]]],
+          controlCost: Math.max(0, this.sgt.lastPlan?.margin ?? 0),
+          activeCableCount: this.contractingCableIndices.length,
+          activeRodCount: 0,
+          disturbanceEstimate: obstacle?.detected ? obstacle.height : 0,
+          horizon: 1,
+          supportFace: this.supportFace,
+          targetEdge: this.targetEdge,
+          comMargin: this.comMargin,
+          sgt: {
+            state: command.state,
+            tips: this.sgt.tipCount,
+            aborts: this.sgt.abortCount,
+            predictedShift: this.sgt.lastPlan?.predictedShift ?? 0
+          }
+        }
+      };
+    }
+
     // Drive-ported optimal solvers (Riccati LQR / iLQR / minimax iLQR /
     // projected QP-MPC) run on the reduced-order rolling model and decide the
     // actuation effort; the support-face state machine below still selects
@@ -2570,7 +2784,7 @@ export class Simulation {
     };
   }
 
-  enforceTerrainNonPenetration() {
+  enforceTerrainNonPenetration(skipNodes = false) {
     // Apply hard contact to every rendered physical component: nodes, bars,
     // outer strings, payload core, and all twelve core suspension cables.
     // Corrections are local to the colliding member; there is no whole-body
@@ -2670,8 +2884,11 @@ export class Simulation {
     };
 
     for (let node = 0; node < this.q.length; node++) {
-      clearanceReport.nodes = Math.min(clearanceReport.nodes,
-        projectPoint(this.q[node], this.v[node], this.cfg.nodeRadius));
+      // With the passive penalty contact, node penetration is part of the
+      // force law; only report clearance, never teleport the node.
+      clearanceReport.nodes = Math.min(clearanceReport.nodes, skipNodes
+        ? this.q[node][2]-this.terrain.eval(this.q[node][0], this.q[node][1]).h-this.cfg.nodeRadius
+        : projectPoint(this.q[node], this.v[node], this.cfg.nodeRadius));
     }
     clearanceReport.core = projectPoint(
       this.corePosition, this.coreVelocity, this.rover.R_core);
@@ -2689,6 +2906,124 @@ export class Simulation {
       lift: maximumLocalCorrection,
       memberContacts: [...memberContactMap.values()]
     };
+  }
+
+  /**
+   * Total mechanical energy of shell + payload core used by the work ledger:
+   * E = T_shell + T_core + V_g. The shell kinetic energy uses the consistent
+   * rigid-bar mass matrix in the DAE core and the lumped node mass otherwise.
+   */
+  /** Queue a whole-body velocity impulse dv [m/s] for the next step. */
+  injectImpulse(dv) {
+    this.pendingImpulse = dv.slice(0, 3);
+  }
+
+  /** External disturbance force [N] on the shell at the current time. */
+  currentDisturbanceForce() {
+    const d = this.cfg.disturbance;
+    if (!d || !Array.isArray(d.force)) return null;
+    const start = d.time ?? 0;
+    const duration = d.type === 'impulse' ? (d.duration ?? this.cfg.dt) : (d.duration ?? Infinity);
+    return this.t >= start && this.t < start+duration ? d.force : null;
+  }
+
+  /**
+   * Run fn() while the controller sees a corrupted copy of the state
+   * (q, v, payload). Noise models: 'gaussian', 'laplace' (heavy-tailed) and
+   * 'outlier' (gaussian plus rare large spikes). The true state is restored.
+   */
+  withSensedState(fn) {
+    const noise = this.cfg.sensorNoise;
+    if (!noise || noise.model === 'none' || !noise.model) return fn();
+    const rng = this.sensorRng;
+    const gauss = () => {
+      const u1 = Math.max(1e-12, rng()), u2 = rng();
+      return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+    };
+    const sample = sigma => {
+      if (noise.model === 'laplace') {
+        const u = rng()-0.5;
+        return -sigma/Math.SQRT2*Math.sign(u)*Math.log(1-2*Math.abs(u));
+      }
+      let value = sigma*gauss();
+      if (noise.model === 'outlier' && rng() < (noise.outlierRate ?? 0.02)) value *= noise.outlierScale ?? 10;
+      return value;
+    };
+    const trueQ = this.q, trueV = this.v, trueCore = this.corePosition, trueCoreV = this.coreVelocity;
+    this.q = trueQ.map(p => p.map(x => x+sample(noise.sigmaQ ?? 0)));
+    this.v = trueV.map(p => p.map(x => x+sample(noise.sigmaV ?? 0)));
+    this.corePosition = trueCore.map(x => x+sample(noise.sigmaQ ?? 0));
+    this.coreVelocity = trueCoreV.map(x => x+sample(noise.sigmaV ?? 0));
+    try {
+      return fn();
+    } finally {
+      this.q = trueQ; this.v = trueV; this.corePosition = trueCore; this.coreVelocity = trueCoreV;
+    }
+  }
+
+  usesPassiveContact() {
+    const model = this.cfg.contactModel || 'auto';
+    return model === 'passive' || (model === 'auto' && this.cfg.physicsCore === 'dae');
+  }
+
+  /**
+   * Contact potential V_c = sum 2/5 k p^2.5 over nodes with vertical
+   * penetration p = h(x,y) + r - z > 0, and its gradient dV/dq (flat).
+   * F = -dV/dq = k p^1.5 (-h_x, -h_y, 1) is exactly conservative on slopes.
+   */
+  contactPotential(qFlat, withGradient = false) {
+    const k = this.cfg.kg, r = this.cfg.nodeRadius;
+    let V = 0;
+    const grad = withGradient ? new Float64Array(qFlat.length) : null;
+    if (!this.cfg.enableGround) return { V, grad };
+    for (let i = 0; i < qFlat.length/3; i++) {
+      const x = qFlat[3*i], y = qFlat[3*i+1], z = qFlat[3*i+2];
+      const surface = this.terrain.eval(x, y);
+      const pen = surface.h+r-z;
+      if (pen <= 0) continue;
+      V += 0.4*k*Math.pow(pen, 2.5);
+      if (grad) {
+        const kp = k*Math.pow(pen, 1.5);
+        grad[3*i] = kp*surface.dhdx;
+        grad[3*i+1] = kp*surface.dhdy;
+        grad[3*i+2] = -kp;
+      }
+    }
+    return { V, grad };
+  }
+
+  ledgerEnergy() {
+    const g = this.cfg.gravity;
+    let T = 0, Vg = 0;
+    if (this.cfg.physicsCore === 'dae' && this.dae) {
+      const energy = this.dae.energy(flatten(this.q), flatten(this.v));
+      T = energy.T; Vg = energy.Vg;
+    } else {
+      for (let i = 0; i < this.q.length; i++) {
+        const v = this.v[i], q = this.q[i];
+        T += 0.5*this.dynamicNodeMass*(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+        Vg -= this.dynamicNodeMass*(g[0]*q[0]+g[1]*q[1]+g[2]*q[2]);
+      }
+    }
+    const vc = this.coreVelocity, qc = this.corePosition, mc = this.plantCoreMass ?? this.cfg.coreMass;
+    T += 0.5*mc*(vc[0]*vc[0]+vc[1]*vc[1]+vc[2]*vc[2]);
+    Vg -= mc*(g[0]*qc[0]+g[1]*qc[1]+g[2]*qc[2]);
+    const Vc = this.usesPassiveContact() ? this.contactPotential(flatten(this.q)).V : 0;
+    return T+Vg+Vc;
+  }
+
+  /** Book the energy change of an instantaneous projection into a category. */
+  bookProjection(category, before) {
+    if (!this.cfg.energyLedger) return;
+    const after = this.ledgerEnergy();
+    this.ledger.work[category] += after-before;
+    return after;
+  }
+
+  ledgerTotalWork() {
+    let total = 0;
+    for (const value of Object.values(this.ledger.work)) total += value;
+    return total;
   }
 
   calcOuterCableForce(idx, ell, v_rel, actuationOffset) {
@@ -2715,8 +3050,9 @@ export class Simulation {
     // dL/dt is positive while the cable stretches. Damping must increase
     // tensile resistance in that case; the old negative sign was anti-damping
     // and injected energy into every extension/shortening cycle.
-    const dampForce = clampValue(cS*v_rel, -0.75*relaxedResult.tension, 120.0);
-    let tension = relaxedResult.tension+dampForce;
+    const elastic = relaxedResult.tension*(this.cfg.plantStiffnessScale ?? 1);
+    const dampForce = clampValue(cS*v_rel, -0.75*elastic, 120.0);
+    let tension = elastic+dampForce;
 
     return Math.max(0.0, Math.min(this.cfg.maxCableTensionSafety, Number.isFinite(tension) ? tension : 0.0));
   }
@@ -2727,6 +3063,27 @@ export class Simulation {
     const q = this.q;
     const v = this.v;
     const dt = cfg.dt;
+    const ledgerOn = cfg.energyLedger !== false;
+    const useDae = cfg.physicsCore === 'dae';
+    const pure = Boolean(cfg.pureCableActuation);
+    const passiveContact = this.usesPassiveContact();
+    this.dae.setGravity(cfg.gravity);
+    if (ledgerOn) {
+      // Live parameter edits (gravity selector, physics-core toggle) change
+      // E at a fixed state; book that as parameter work, not as error.
+      const startEnergy = this.ledgerEnergy();
+      if (this.stepCount > 0) this.ledger.work.parameter += startEnergy-this.ledger.E;
+      else this.ledger.E0 = startEnergy; // edits before the first step are the initial condition
+      this.ledger.E = startEnergy;
+    }
+    if (this.pendingImpulse) {
+      // Velocity impulse on the whole rover (shell + payload), booked as work.
+      const dv = this.pendingImpulse;
+      this.pendingImpulse = null;
+      for (const vel of v) for (let a = 0; a < 3; a++) vel[a] += dv[a];
+      for (let a = 0; a < 3; a++) this.coreVelocity[a] += dv[a];
+      if (ledgerOn) this.ledger.E = this.bookProjection('disturbance', this.ledger.E);
+    }
 
     // Centroid Kinematics
     let cx = 0, cy = 0, cz = 0;
@@ -2747,15 +3104,31 @@ export class Simulation {
     const obstacle = this.senseObstacleAhead(cx, cy, cvy);
 
     if (this.t+1e-12 >= this.nextControllerUpdate) {
-      const controllerResult = this.updateNaturalRollingController(
-        [cx, cy, cz], [cvx, cvy, cvz], omega, obstacle
-      );
-      this.targetActuationOffsets = controllerResult.cableTargets;
-      this.targetCoreActuationOffsets = controllerResult.coreTargets;
-      this.targetRodOffsets = controllerResult.rodTargets;
+      const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const controllerResult = this.withSensedState(() => {
+        let sx = 0, sy = 0, sz = 0, svx = 0, svy = 0, svz = 0;
+        for (let i = 0; i < n; i++) {
+          sx += this.q[i][0]; sy += this.q[i][1]; sz += this.q[i][2];
+          svx += this.v[i][0]; svy += this.v[i][1]; svz += this.v[i][2];
+        }
+        return this.updateNaturalRollingController(
+          [sx/n, sy/n, sz/n], [svx/n, svy/n, svz/n], omega, obstacle);
+      });
+      const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())-started;
+      this.controllerTiming.count++;
+      this.controllerTiming.totalMs += elapsedMs;
+      this.controllerTiming.maxMs = Math.max(this.controllerTiming.maxMs, elapsedMs);
       this.controlDiagnostics = controllerResult.diagnostics;
+      this.commandQueue.push({ applyAt: this.t+(cfg.actuatorDelay || 0), result: controllerResult });
       this.nextControllerUpdate += cfg.controllerDt;
       if (this.nextControllerUpdate <= this.t) this.nextControllerUpdate = this.t+cfg.controllerDt;
+    }
+    // Actuator latency: commands reach the spools actuatorDelay seconds later.
+    while (this.commandQueue.length && this.commandQueue[0].applyAt <= this.t+1e-12) {
+      const command = this.commandQueue.shift().result;
+      this.targetActuationOffsets = command.cableTargets;
+      this.targetCoreActuationOffsets = command.coreTargets;
+      this.targetRodOffsets = command.rodTargets;
     }
 
     // Rate-limited cable inputs with hard min/max rest-length constraints.
@@ -2796,6 +3169,21 @@ export class Simulation {
 
     // Forces
     const fNode = new Array(n).fill(0).map(() => [0.0, 0.0, 0.0]);
+    // Per-category force snapshots for the work ledger: each force block below
+    // is followed by snapForces(category), which stores what that block added.
+    const catF = {};
+    const prevF = new Float64Array(3*n);
+    const snapForces = category => {
+      if (!ledgerOn) return;
+      const arr = catF[category] || (catF[category] = new Float64Array(3*n));
+      for (let i = 0; i < n; i++) {
+        for (let a = 0; a < 3; a++) {
+          const value = fNode[i][a];
+          arr[3*i+a] += value-prevF[3*i+a];
+          prevF[3*i+a] = value;
+        }
+      }
+    };
     const outerCableForces = new Array(this.rover.outerStrings.length).fill(0);
     const strutForces = new Array(this.rover.bars.length).fill(0);
     const isActuatedCable = new Array(this.rover.outerStrings.length).fill(false);
@@ -2826,12 +3214,15 @@ export class Simulation {
       fNode[j][1] += tension * dir[1];
       fNode[j][2] += tension * dir[2];
     }
+    snapForces('cables');
     if (maxExtension > this.metrics.maxCableExtension) this.metrics.maxCableExtension = maxExtension;
     this.metrics.energyCost += outerCableForces.reduce((energy, tension, cable) =>
       energy+tension*actuatorLengthChange[cable], 0);
 
-    // 2. Rod forces, with optional bounded rest-length actuation.
-    for (let b = 0; b < this.rover.bars.length; b++) {
+    // 2. Rod forces, with optional bounded rest-length actuation. In the DAE
+    // core the bars are exact holonomic constraints (Lagrange multipliers),
+    // so no penalty spring is applied; their axial forces come from lambda.
+    for (let b = 0; b < this.rover.bars.length && !useDae; b++) {
       const [i, j] = this.rover.bars[b];
       const dq = [q[i][0] - q[j][0], q[i][1] - q[j][1], q[i][2] - q[j][2]];
       const ell = Math.max(Math.sqrt(dq[0]*dq[0] + dq[1]*dq[1] + dq[2]*dq[2]), 1e-6);
@@ -2852,14 +3243,23 @@ export class Simulation {
       fNode[j][2] += f_bar * dir[2];
     }
 
+    snapForces('rodPenalty');
+    if (useDae) {
+      for (let b = 0; b < this.rover.bars.length; b++) {
+        this.dae.barLengths[b] = this.rover.l0_bars[b]+this.currentRodOffsets[b];
+        isActuatedBar[b] = Math.abs(this.currentRodOffsets[b]) > 0.002;
+      }
+    }
+
     // 2b. Explicit suspended payload core. Twelve tension-only radial cables
     // transmit shell motion to the payload; equal and opposite reactions act
     // on the outer nodes. Proper acceleration is measured from these physical
     // non-gravitational suspension forces, not inferred from shell centroid.
+    const plantCoreMass = this.plantCoreMass ?? cfg.coreMass;
     const coreForce = [
-      cfg.gravity[0]*cfg.coreMass-0.08*this.coreVelocity[0],
-      cfg.gravity[1]*cfg.coreMass-0.08*this.coreVelocity[1],
-      cfg.gravity[2]*cfg.coreMass-0.08*this.coreVelocity[2]
+      cfg.gravity[0]*plantCoreMass-0.08*this.coreVelocity[0],
+      cfg.gravity[1]*plantCoreMass-0.08*this.coreVelocity[1],
+      cfg.gravity[2]*plantCoreMass-0.08*this.coreVelocity[2]
     ];
     const coreSuspensionForce = [0, 0, 0];
     for (let i = 0; i < n; i++) {
@@ -2887,7 +3287,10 @@ export class Simulation {
       }
     }
 
+    snapForces('core');
+
     // 3. Ground Contact
+    const contactConservative = new Float64Array(3*n);
     const contactNodes = [];
     const contactDetails = [];
     let actuationTraction = 0;
@@ -2908,6 +3311,52 @@ export class Simulation {
       const totalMass = n*this.dynamicNodeMass+cfg.coreMass;
       const supportedWeightPerContact = totalMass*Math.abs(cfg.gravity[2])/
         Math.max(1, contactCandidates.length);
+      if (passiveContact) {
+        contactCandidates.length = 0;
+        const alpha = cfg.contactDampingAlpha ?? 1.5;
+        const epsSlip = cfg.frictionRegularization ?? 0.02;
+        for (let i = 0; i < n; i++) {
+          const surf = this.terrain.eval(q[i][0], q[i][1]);
+          const pen = surf.h+cfg.nodeRadius-q[i][2];
+          if (pen <= 0) continue;
+          contactNodes.push(i);
+          const hx = surf.dhdx, hy = surf.dhdy;
+          const gradLength = Math.hypot(hx, hy, 1);
+          const normal = [-hx/gradLength, -hy/gradLength, 1/gradLength];
+          // pdot = d/dt(h + r - z) along the node velocity
+          const pdot = hx*v[i][0]+hy*v[i][1]-v[i][2];
+          const kp = cfg.kg*Math.pow(pen, 1.5);
+          const magnitude = Math.max(0, kp*(1+alpha*pdot)); // along (-h_x,-h_y,1)
+          for (let a = 0; a < 3; a++) {
+            const conservative = kp*[-hx, -hy, 1][a];
+            fNode[i][a] += magnitude*[-hx, -hy, 1][a];
+            contactConservative[3*i+a] += conservative;
+          }
+          const normalForce = magnitude*gradLength;
+          const vn = v[i][0]*normal[0]+v[i][1]*normal[1]+v[i][2]*normal[2];
+          const tangent = [v[i][0]-vn*normal[0], v[i][1]-vn*normal[1], v[i][2]-vn*normal[2]];
+          const slip = Math.hypot(...tangent);
+          let mu = cfg.mu_g*(cfg.plantFrictionScale ?? 1);
+          let dragScale = 1.0;
+          if (this.terrain.marshes && this.terrain.marshes.length > 0) {
+            const marshInfo = this.terrain.marshAt(q[i][0], q[i][1]);
+            if (marshInfo.inMarsh) mu *= marshInfo.frictionScale;
+          }
+          if (this.terrain.sandPatches && this.terrain.sandPatches.length > 0) {
+            const sandInfo = this.terrain.sandAt(q[i][0], q[i][1]);
+            if (sandInfo.inSand) { mu *= sandInfo.frictionScale; dragScale = sandInfo.dragScale; }
+          }
+          const frictionScale = mu*normalForce/Math.sqrt(slip*slip+epsSlip*epsSlip)+cfg.c_gt*dragScale*(normalForce > 0 ? 1 : 0);
+          const frictionForce = tangent.map(component => -frictionScale*component);
+          for (let a = 0; a < 3; a++) fNode[i][a] += frictionForce[a];
+          contactDetails.push({
+            kind: 'node', id: `N${i+1}`, nodeIndex: i,
+            objectId: this.terrain.objectAt(q[i][0], q[i][1]),
+            position: [q[i][0], q[i][1], surf.h],
+            normal, normalForce, frictionForce
+          });
+        }
+      }
       for (const candidate of contactCandidates) {
         const { i, surf, zGround, smoothPenetration, contactBlend } = candidate;
         contactNodes.push(i);
@@ -2932,7 +3381,7 @@ export class Simulation {
         const tangentZ = v[i][2]-normalVelocity*normal[2];
         const slip = Math.hypot(tangentX, tangentY, tangentZ);
         if (slip > 1e-5) {
-          let mu = slip < 0.04 ? cfg.mu_g : 0.82*cfg.mu_g;
+          let mu = (slip < 0.04 ? cfg.mu_g : 0.82*cfg.mu_g)*(cfg.plantFrictionScale ?? 1);
           let dragScale = 1.0;
           // Marsh zones reduce friction (boggy ground, soft traction)
           if (this.terrain.marshes && this.terrain.marshes.length > 0) {
@@ -2947,7 +3396,9 @@ export class Simulation {
               dragScale = sandInfo.dragScale;
             }
           }
-          const frictionLimit = mu*reportedNormalForce;
+          // Pure-physics mode bounds friction by the actual penalty normal
+          // force; the default keeps the supported-weight envelope.
+          const frictionLimit = mu*(pure ? normalForce : reportedNormalForce);
           const effectiveSupportedMass = totalMass/Math.max(1, contactCandidates.length);
           const desiredFriction =
             effectiveSupportedMass*slip/0.025+cfg.c_gt*dragScale*slip;
@@ -2972,13 +3423,19 @@ export class Simulation {
       }
     }
 
+    snapForces('contact');
+    if (ledgerOn && passiveContact && catF.contact) {
+      // The spring part is -dV_c/dq and is carried by the contact potential.
+      for (let idx = 0; idx < 3*n; idx++) catF.contact[idx] -= contactConservative[idx];
+    }
+
     // Convert the support-face command into a roll couple, not a forward pull.
     // The lower nodes receive a backward tangential force and upper nodes an
     // equal forward force. Net force is zero, while both halves generate the
     // angular acceleration required for forward rolling.
     const rollingDriveStates = ['PRELOAD', 'SHIFT_COM', 'TIP', 'ROLL'];
     if (contactNodes.length && rollingDriveStates.includes(this.locomotionState) &&
-      cfg.actuationMode !== 'none') {
+      cfg.actuationMode !== 'none' && !pure) {
       const desired = this.controlDiagnostics.desiredDirection || [0, 1, 0];
       const desiredNorm = Math.hypot(desired[0], desired[1]);
       if (desiredNorm > 1e-9) {
@@ -3058,10 +3515,12 @@ export class Simulation {
       }
     }
 
+    snapForces('assist');
+
     // Repulsive obstacle field adapted from the Drive paper reproduction.
     // Stones come from the spatial hash window around each node, which is
     // exactly the set that could pass the sensing-radius test below.
-    if (this.modelType === 'adaptive' && cfg.obstacleAvoidance) {
+    if (this.modelType === 'adaptive' && cfg.obstacleAvoidance && !pure) {
       const sensingRadius = cfg.obstacleSensingRadius;
       const gamma = cfg.obstacleAvoidanceExponent;
       const queryReach = sensingRadius+this.terrain.maxSolidScatterRadius;
@@ -3084,7 +3543,7 @@ export class Simulation {
 
     // 4. Rotational Damping (Anti-Spin)
     const antiSpinThreshold = cfg.antiSpinThreshold ?? 0.80;
-    if (omega > antiSpinThreshold) {
+    if (omega > antiSpinThreshold && !pure) {
       const dampCoeff = Math.min(24.0, 5.0 * (omega - antiSpinThreshold));
       for (let i = 0; i < n; i++) {
         // Damping the measured velocity relative to the centroid is always
@@ -3096,6 +3555,8 @@ export class Simulation {
       }
     }
 
+    snapForces('virtual');
+
     // General XYZ viscous damping and gravity from the Drive force stack.
     for (let i = 0; i < n; i++) {
       fNode[i][0] -= cfg.damping * v[i][0];
@@ -3106,15 +3567,45 @@ export class Simulation {
       fNode[i][2] += cfg.gravity[2]*this.dynamicNodeMass;
     }
 
-    // Velocity integration
-    for (let i = 0; i < n; i++) {
-      const a = [fNode[i][0]/this.dynamicNodeMass, fNode[i][1]/this.dynamicNodeMass, fNode[i][2]/this.dynamicNodeMass];
-      v[i][0] += a[0] * dt;
-      v[i][1] += a[1] * dt;
-      v[i][2] += a[2] * dt;
+    snapForces('dragGravity');
+    const disturbanceForce = this.currentDisturbanceForce();
+    if (disturbanceForce) {
+      for (let i = 0; i < n; i++) {
+        for (let a = 0; a < 3; a++) fNode[i][a] += disturbanceForce[a]/n;
+      }
+      snapForces('disturbance');
+    }
+    if (ledgerOn && catF.dragGravity) {
+      // Gravity is carried by the potential V_g; only the drag part is work.
+      catF.drag = catF.dragGravity;
+      for (let i = 0; i < n; i++) {
+        for (let a = 0; a < 3; a++) catF.drag[3*i+a] -= cfg.gravity[a]*this.dynamicNodeMass;
+      }
+      delete catF.dragGravity;
+    }
+
+    // Velocity integration (semi-implicit Euler in both cores)
+    const vOld = ledgerOn ? flatten(v) : null;
+    const coreVelocityOld = this.coreVelocity.slice();
+    if (useDae) {
+      // Constrained accelerations, Eq. (34)-(35): M qdd = F + Rq' lambda
+      const qFlat = flatten(q);
+      const vFlat = flatten(v);
+      const solution = this.dae.accelerations(qFlat, vFlat, flatten(fNode));
+      for (let idx = 0; idx < 3*n; idx++) vFlat[idx] += solution.qdd[idx]*dt;
+      unflatten(vFlat, v);
+      for (let b = 0; b < this.rover.bars.length; b++) strutForces[b] = Math.abs(solution.barForces[b]);
+      this.lastBarForces = Array.from(solution.barForces);
+    } else {
+      for (let i = 0; i < n; i++) {
+        const a = [fNode[i][0]/this.dynamicNodeMass, fNode[i][1]/this.dynamicNodeMass, fNode[i][2]/this.dynamicNodeMass];
+        v[i][0] += a[0] * dt;
+        v[i][1] += a[1] * dt;
+        v[i][2] += a[2] * dt;
+      }
     }
     for (let axis = 0; axis < 3; axis++) {
-      this.coreVelocity[axis] += coreForce[axis]/cfg.coreMass*dt;
+      this.coreVelocity[axis] += coreForce[axis]/plantCoreMass*dt;
     }
 
     for (let i = 0; i < n; i++) {
@@ -3126,10 +3617,31 @@ export class Simulation {
       this.corePosition[axis] += this.coreVelocity[axis]*dt;
     }
 
+    // Work of every applied force over the step, trapezoidal in velocity:
+    // for v+ = v + M^-1 F dt this matches the kinetic-energy change exactly.
+    if (ledgerOn) {
+      for (const [category, arr] of Object.entries(catF)) {
+        let power = 0;
+        for (let i = 0; i < n; i++) {
+          for (let a = 0; a < 3; a++) power += arr[3*i+a]*0.5*(vOld[3*i+a]+v[i][a]);
+        }
+        this.ledger.work[category] += power*dt;
+      }
+      let corePower = 0, coreDragPower = 0;
+      for (let a = 0; a < 3; a++) {
+        const average = 0.5*(coreVelocityOld[a]+this.coreVelocity[a]);
+        corePower += coreSuspensionForce[a]*average;
+        coreDragPower += -0.08*coreVelocityOld[a]*average;
+      }
+      this.ledger.work.core += corePower*dt;
+      this.ledger.work.drag += coreDragPower*dt;
+    }
+    let ledgerMark = ledgerOn ? this.ledgerEnergy() : 0;
+
     // Position-based SHAKE is used only for genuine rigid-bar and collision
     // constraints. There is no spherical shape clamp and no COM translation.
-    for (let iter = 0; iter < 12; iter++) {
-      for (let b = 0; b < this.rover.bars.length; b++) {
+    for (let iter = 0; iter < (useDae ? 1 : 12); iter++) {
+      for (let b = 0; b < this.rover.bars.length && !useDae; b++) {
         const [i, j] = this.rover.bars[b];
         const l0 = this.rover.l0_bars[b] + this.currentRodOffsets[b];
         const dx = q[i][0]-q[j][0];
@@ -3142,7 +3654,7 @@ export class Simulation {
           q[j][0] += dx*scale; q[j][1] += dy*scale; q[j][2] += dz*scale;
         }
       }
-      if (cfg.enableGround) {
+      if (cfg.enableGround && !passiveContact) {
         for (let i = 0; i < n; i++) {
           const minimumZ = this.terrain.eval(q[i][0], q[i][1]).h + cfg.nodeRadius + cfg.terrainClearanceEpsilon;
           if (q[i][2] < minimumZ) q[i][2] = minimumZ;
@@ -3150,14 +3662,24 @@ export class Simulation {
       }
     }
 
+    // Legacy: SHAKE rod projection + node clamp. DAE: node clamp only.
+    if (ledgerOn) ledgerMark = this.bookProjection(useDae ? 'contact' : 'constraint', ledgerMark);
+
     // Keep each complete shell inside its own lane before resolving the
     // terrain at the corrected x positions. The translation is lateral only
     // and applies equally to every component, preserving all rod lengths.
-    const corridorProjection = this.enforcePathCorridor();
+    // It is an external aid (a teleport), so pure-physics mode disables it.
+    const corridorProjection = pure
+      ? { lane: this.modelType === 'fixed' ? 'A' : 'B',
+        worldOffset: this.modelType === 'fixed' ? -cfg.modelLaneOffset : cfg.modelLaneOffset,
+        halfWidth: cfg.pathCorridorHalfWidth, centreX: cx, correction: 0, boundaryHit: false }
+      : this.enforcePathCorridor();
     if (corridorProjection.boundaryHit) this.metrics.corridorBoundaryHits++;
+    if (ledgerOn) ledgerMark = this.bookProjection('assist', ledgerMark);
 
     // Final hard collision projection catches sub-millimetre roundoff.
-    const terrainProjection = this.enforceTerrainNonPenetration();
+    const terrainProjection = this.enforceTerrainNonPenetration(passiveContact);
+    if (ledgerOn) ledgerMark = this.bookProjection('contact', ledgerMark);
     for (const component of ['nodes', 'bars', 'outerCables', 'core', 'coreCables']) {
       this.metrics.minimumTerrainClearances[component] = Math.min(
         this.metrics.minimumTerrainClearances[component],
@@ -3173,7 +3695,7 @@ export class Simulation {
     // cannot couple rotation into translation on rough ground (Level 14)
     // and slips straight backward; the models differ by controller quality,
     // not by contact physics.
-    if (cfg.enableGround && contactNodes.length) {
+    if (cfg.enableGround && contactNodes.length && !pure) {
       let projectedCx = 0, projectedCy = 0, projectedCz = 0;
       let projectedVx = 0, projectedVy = 0, projectedVz = 0;
       for (let node = 0; node < n; node++) {
@@ -3219,10 +3741,13 @@ export class Simulation {
       }
     }
 
+    if (ledgerOn) ledgerMark = this.bookProjection('assist', ledgerMark);
+
     // Position projection alone leaves a velocity component that immediately
     // tries to stretch each rigid bar again. Remove that component so the
     // constraint does not inject energy on the next integration step.
-    for (let b = 0; b < this.rover.bars.length; b++) {
+    // (Legacy core only; the DAE core is corrected by Algorithm 1 below.)
+    for (let b = 0; b < this.rover.bars.length && !useDae; b++) {
       const [i, j] = this.rover.bars[b];
       const dq = [q[i][0] - q[j][0], q[i][1] - q[j][1], q[i][2] - q[j][2]];
       const ell = Math.sqrt(dq[0]*dq[0] + dq[1]*dq[1] + dq[2]*dq[2]);
@@ -3241,10 +3766,12 @@ export class Simulation {
       }
     }
 
+    if (ledgerOn) ledgerMark = this.bookProjection('constraint', ledgerMark);
+
     // Resolve inward contact velocity along the actual terrain normal. The
     // tiny restitution is physical and prevents the projection from creating
     // the repeated bounce/penetrate cycle seen in the old implementation.
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n && !passiveContact; i++) {
       const surface = this.terrain.eval(q[i][0], q[i][1]);
       const clearance = q[i][2]-surface.h-cfg.nodeRadius;
       if (clearance > cfg.terrainClearanceEpsilon+0.002) continue;
@@ -3257,6 +3784,62 @@ export class Simulation {
         v[i][1] += impulseSpeed*normal[1];
         v[i][2] += impulseSpeed*normal[2];
       }
+    }
+
+    if (ledgerOn) ledgerMark = this.bookProjection('contact', ledgerMark);
+
+    // Algorithm 1 (Eq. 56-57): drive R(q) = 0, Rq qdot = 0 and, optionally,
+    // E(q, qdot) = E0 + W_f to machine-level tolerance after every step.
+    let correctorInfo = null;
+    let preCorrectionResidual = null;
+    if (useDae) {
+      const qFlat = flatten(q);
+      const vFlat = flatten(v);
+      let target = null;
+      const residualNow = ledgerOn ? ledgerMark-this.ledger.E0-this.ledgerTotalWork() : 0;
+      preCorrectionResidual = residualNow;
+      // The energy row corrects integration drift only. A large discrepancy
+      // is not drift (e.g. an unbooked external edit) and must not be forced
+      // into the velocities; it is left visible in the residual instead.
+      const driftLimit = Math.max(cfg.daeEnergyDriftAbs ?? 0.5,
+        (cfg.daeEnergyDriftRel ?? 0.02)*Math.abs(ledgerMark));
+      if (cfg.daeEnergyCorrection && ledgerOn && Math.abs(residualNow) <= driftLimit) {
+        const residual = residualNow;
+        const contactV = passiveContact ? this.contactPotential(qFlat).V : 0;
+        target = this.dae.energy(qFlat, vFlat).E+contactV-residual;
+      }
+      correctorInfo = this.dae.correct(qFlat, vFlat, target, {
+        potential: passiveContact ? (qq => this.contactPotential(qq, true)) : null,
+        gamma: cfg.daeGamma ?? 1e-10,
+        energyGamma: cfg.daeEnergyGamma ?? 1e-9,
+        maxIter: cfg.daeMaxIterations ?? 10
+      });
+      unflatten(qFlat, q);
+      unflatten(vFlat, v);
+      if (ledgerOn) {
+        if (target !== null) {
+          this.ledger.work.corrector += correctorInfo.dW;
+          ledgerMark = this.ledgerEnergy();
+        } else {
+          ledgerMark = this.bookProjection('constraint', ledgerMark);
+        }
+        this.ledger.correctorIterations += correctorInfo.iters;
+        this.ledger.maxCorrectorIterations = Math.max(this.ledger.maxCorrectorIterations, correctorInfo.iters);
+      }
+    }
+    if (ledgerOn) {
+      this.ledger.E = ledgerMark;
+      const previousResidual = this.ledger.residual;
+      this.ledger.residual = ledgerMark-this.ledger.E0-this.ledgerTotalWork();
+      const pre = preCorrectionResidual ?? this.ledger.residual;
+      if (this.stepCount > 0) {
+        const drift = pre-previousResidual;
+        this.ledger.stepDrift = drift;
+        this.ledger.maxStepDrift = Math.max(this.ledger.maxStepDrift, Math.abs(drift));
+        this.ledger.driftAbs += Math.abs(drift);
+        this.ledger.driftSigned += drift;
+      }
+      if (this.t > 0) this.ledger.maxAbsResidual = Math.max(this.ledger.maxAbsResidual, Math.abs(this.ledger.residual));
     }
 
     // Position-level rod residual (the Drive RodConstraints c(q)=0 check),
@@ -3504,7 +4087,23 @@ export class Simulation {
       monitoring,
       learning: this.routeLearner?.snapshot(this.learningCommand) || this.metrics.learning,
       contacts: monitoring?.contacts || contactDetails,
-      cableTelemetry: monitoring?.cables || []
+      cableTelemetry: monitoring?.cables || [],
+      physicsCore: useDae ? 'dae' : 'legacy',
+      pureCableActuation: pure,
+      barForces: useDae ? this.lastBarForces : strutForces.slice(),
+      correctorIterations: correctorInfo ? correctorInfo.iters : 0,
+      energyLedger: ledgerOn ? {
+        E: this.ledger.E,
+        E0: this.ledger.E0,
+        residual: this.ledger.residual,
+        maxAbsResidual: this.ledger.maxAbsResidual,
+        stepDrift: this.ledger.stepDrift,
+        maxStepDrift: this.ledger.maxStepDrift,
+        driftAbs: this.ledger.driftAbs,
+        driftSigned: this.ledger.driftSigned,
+        work: { ...this.ledger.work },
+        assistShare: assistEnergyShare(this.ledger.work, this.metrics.energyCost)
+      } : null
     };
 
     if (scoredRun && !this.runFinalized) {
@@ -3534,6 +4133,14 @@ export class Simulation {
       this.history.slipSpeed.push(slipSpeed);
       this.history.kineticEnergy.push(kineticEnergy);
       this.history.rollingRatio.push(rollingRatio);
+      const work = this.ledger.work;
+      this.history.energyResidual.push(this.ledger.residual);
+      this.history.constraintWork.push(work.constraint+work.corrector);
+      this.history.assistWork.push(work.assist+work.virtual);
+      this.history.cableWork.push(work.cables);
+      this.history.contactWork.push(work.contact);
+      this.history.dragWork.push(work.drag);
+      this.history.totalEnergy.push(this.ledger.E);
     }
 
     if (this.modelType === 'adaptive' && cfg.enableDiagnosticsLog && this.t+1e-9 >= this.nextDiagnosticLog) {

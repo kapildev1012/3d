@@ -1,15 +1,19 @@
 import { DRIVE_CONTROLLER_LABELS } from './reference/controllerAlgorithms.js';
 import { attachDriveControllerSuite } from './reference/simulationControllerAdapter.js';
-import { Simulation, SimConfig } from './simEngine.js?v=20260821-level10';
+import { Simulation, SimConfig, SphericalRoverModel, TerrainModel } from './simEngine.js?v=20261021-ws1';
 
-DRIVE_CONTROLLER_LABELS['master_hybrid'] = 'Master Hybrid · Multi-Terrain Adaptive Solver';
+// DRIVE_CONTROLLER_LABELS is frozen; keep the hybrid label locally instead of
+// mutating it (the old assignment threw "object is not extensible" in strict
+// module code and silently disabled this whole module).
+const MASTER_HYBRID_LABEL = 'Master Hybrid · Multi-Terrain Adaptive Solver';
+const labelFor = mode => (mode === 'master_hybrid' ? MASTER_HYBRID_LABEL : DRIVE_CONTROLLER_LABELS[mode] || mode);
 
 window.addEventListener('tensegrity:drive-controller-suite-ready', () => {
     const selector = document.getElementById('select-controller');
     if (selector && !selector.querySelector(`option[value="master_hybrid"]`)) {
         const option = document.createElement('option');
         option.value = 'master_hybrid';
-        option.textContent = DRIVE_CONTROLLER_LABELS['master_hybrid'];
+        option.textContent = MASTER_HYBRID_LABEL;
         selector.prepend(option);
     }
 });
@@ -33,16 +37,17 @@ class MasterHybridAdapter {
 
         const sim = this.simulation;
         const cfg = sim.cfg;
-        const level = cfg.terrainLevel;
         let nextMode = 'qp_mpc_payload';
 
-        // Detect aggressive climb conditions
-        const isClimbing = sim.gaitState === 'DEFORM_CLIMB' || 
-                           cfg.inclineDegrees >= 8 || 
+        // Mode switching uses only on-board measurements (no terrain IDs):
+        // climbing = obstacle phase or a measured uphill grade / contact load,
+        // slip = measured contact slip speed relative to the shell speed.
+        const diag = sim.currentDiag || {};
+        const isClimbing = sim.obstaclePhase === 'DEFORM_CLIMB' ||
+                           cfg.inclineDegrees >= 8 ||
                            this.detectHighContactForce(sim);
-                           
-        // Detect slip conditions
-        const isSlipTerrain = [9, 12, 13].includes(level);
+        const speed = Math.hypot(...(diag.velocityVector || [0, 0, 0]));
+        const isSlipTerrain = (diag.slipSpeed || 0) > Math.max(0.15, 0.6*speed);
 
         if (isSlipTerrain) {
             nextMode = 'ilqr_minimax'; // Robust adversarial
@@ -59,8 +64,9 @@ class MasterHybridAdapter {
             this.previousCommand = this.activeCommand;
         }
 
-        // Always enable Hermite relaxation for isolation
-        cfg.stringRelaxation = true;
+        // (Hermite relaxation is already always active for the adaptive model in
+        // calcOuterCableForce; the old global cfg.stringRelaxation = true also
+        // changed Model A through the shared config, so it was removed.)
 
         const result = this.suite.solve(this.currentMode, centroid, velocity, obstacle);
         this.activeCommand = result;
@@ -81,12 +87,8 @@ class MasterHybridAdapter {
     }
 
     detectHighContactForce(sim) {
-        for (const [nodeIdx, active] of Object.entries(sim.contactState || {})) {
-            if (active && sim.normalForce && sim.normalForce[nodeIdx] > 25) {
-                return true;
-            }
-        }
-        return false;
+        const weight = (sim.dynamicNodeMass*sim.rover.nOuter+sim.cfg.coreMass)*Math.abs(sim.cfg.gravity[2]);
+        return (sim.currentDiag?.contacts || []).some(contact => (contact.normalForce || 0) > 0.6*weight);
     }
 }
 
@@ -101,11 +103,15 @@ Simulation.prototype.updateNaturalRollingController = function (...args) {
     return originalController.apply(this, args);
 };
 
-// Headless Batch Benchmark Runner
+// Physics-audit batch runner (headless, chunked so the UI stays responsive).
+// Every run uses the real Simulation API on the Lagrangian DAE core and
+// reports measured progress, energy residual and assist share.
 class BatchBenchmarkRunner {
-    constructor() {
-        this.controllers = Object.keys(DRIVE_CONTROLLER_LABELS);
-        this.terrains = Array.from({length: 14}, (_, i) => i + 1);
+    constructor(options = {}) {
+        this.controllers = options.controllers || ['natural_support_face', 'sgt_tipping'];
+        this.levels = options.levels || [1, 4, 7];
+        this.modes = options.modes || ['assisted', 'pure'];
+        this.duration = options.duration || 20;
         this.results = [];
         this.progressEl = document.getElementById('benchmark-progress');
         this.leaderEl = document.getElementById('benchmark-leader');
@@ -114,145 +120,97 @@ class BatchBenchmarkRunner {
 
     async runAll() {
         this.results = [];
-        this.tbody.innerHTML = '';
-        
-        let total = this.controllers.length * this.terrains.length;
-        let count = 0;
-
-        for (const terrain of this.terrains) {
-            for (const controller of this.controllers) {
-                this.progressEl.textContent = `Running Terrain ${terrain}, Controller ${controller} (${count}/${total})`;
-                
-                const result = await this.runSingleHeadless(controller, terrain);
-                this.results.push(result);
-                
-                this.appendResultRow(result);
-                this.updateLeaderboard();
-                
-                count++;
-                await new Promise(r => setTimeout(r, 0)); // Yield to UI
-            }
+        if (this.tbody) this.tbody.innerHTML = '';
+        const jobs = [];
+        for (const level of this.levels) for (const controller of this.controllers) for (const mode of this.modes) jobs.push({ level, controller, mode });
+        for (let i = 0; i < jobs.length; i++) {
+            const job = jobs[i];
+            if (this.progressEl) this.progressEl.textContent = `${i+1}/${jobs.length} · L${job.level} · ${labelFor(job.controller)} · ${job.mode}`;
+            const result = await this.runSingle(job);
+            this.results.push(result);
+            this.appendResultRow(result);
+            this.updateLeaderboard();
         }
-
-        this.progressEl.textContent = 'Completed';
+        if (this.progressEl) this.progressEl.textContent = `Completed ${jobs.length} runs`;
         this.exportCSV();
         this.exportJSON();
     }
 
-    async runSingleHeadless(controller, level) {
-        // Run in fast headless mode
-        const cfg = new SimConfig({
-            controllerMode: controller,
-            terrainLevel: level,
-            T_end: 120.0,
-            showAnimation: false // Headless speedup
-        });
-
-        const sim = new Simulation(cfg);
-        sim.initialize();
-
-        const maxSteps = cfg.T_end / cfg.dt;
-        let step = 0;
-        let status = 'TIMEOUT';
-        
-        const startY = sim.rover.q0_outer[0][1];
-        
-        while (step < maxSteps) {
-            sim.step();
-            step++;
-            
-            // Check win/loss conditions
-            const centroid = sim.computeCentroid(sim.rover.q_outer);
-            if (centroid[1] >= 60.0) { // Goal Y
-                status = 'COMPLETED';
-                break;
-            }
-            if (sim.isOverloaded || sim.isCollapsed) {
-                status = 'OVERLOAD';
-                break;
-            }
+    async runSingle({ level, controller, mode }) {
+        const cfg = new SimConfig({ terrainLevel: level, experimentId: level, enableDiagnosticsLog: false,
+            monitoring: { enabled: false } });
+        cfg.applyStandardPerformanceProfile();
+        if (controller === 'sgt_tipping') cfg.applyResearchProfile();
+        Object.assign(cfg, { physicsCore: 'dae', controllerMode: controller, pureCableActuation: mode === 'pure' });
+        const sim = new Simulation(cfg, new SphericalRoverModel(cfg), new TerrainModel(cfg), 'adaptive');
+        const y0 = sim.currentDiag.centroid[1];
+        const steps = Math.round(this.duration/cfg.dt);
+        const chunk = 250;
+        const started = performance.now();
+        for (let k = 0; k < steps; k += chunk) {
+            for (let j = 0; j < chunk && k+j < steps; j++) sim.step();
+            await new Promise(resolve => setTimeout(resolve, 0));
         }
-
-        const finalCentroid = sim.computeCentroid(sim.rover.q_outer);
-        const distance = finalCentroid[1] - startY;
-        const time = step * cfg.dt;
-        const avgSpeed = time > 0 ? distance / time : 0;
-        
-        // Compute CPS
-        const cps = (avgSpeed / 1.30) + (distance / 50.0); // Simplified CPS score
-        
+        const ledger = sim.currentDiag.energyLedger;
+        const dy = sim.currentDiag.centroid[1]-y0;
         return {
-            level,
-            controller,
-            status,
-            distance: distance.toFixed(2),
-            time: time.toFixed(2),
-            avgSpeed: avgSpeed.toFixed(2),
-            maxG: (sim.diagnostics?.maxPayloadG || 1.0).toFixed(2),
-            maxTension: (sim.diagnostics?.maxTension || 0.0).toFixed(1),
-            deformation: (sim.diagnostics?.maxDeformation || 0.0).toFixed(3),
-            obstacles: level >= 10 ? 10 : 0,
-            cps: cps.toFixed(2)
+            level, controller, mode, duration: this.duration,
+            progressY: dy, speed: dy/this.duration,
+            path: sim.metrics.distanceTraveled,
+            maxResidual: ledger.maxAbsResidual,
+            assistShare: ledger.assistShare,
+            actuatorEnergy: sim.metrics.energyCost,
+            maxBarError: sim.metrics.maxConstraintError,
+            tips: sim.sgt?.tipCount ?? sim.completedRolls,
+            wallSeconds: (performance.now()-started)/1000
         };
     }
 
     appendResultRow(res) {
+        if (!this.tbody) return;
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="p-2 border-t border-slate-800">Level ${res.level}</td>
-            <td class="p-2 border-t border-slate-800">${DRIVE_CONTROLLER_LABELS[res.controller] || res.controller}</td>
-            <td class="p-2 border-t border-slate-800">
-                <span class="px-2 py-1 rounded text-[10px] font-bold ${res.status === 'COMPLETED' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-rose-900/50 text-rose-400'}">${res.status}</span>
-            </td>
-            <td class="p-2 border-t border-slate-800">${res.distance}</td>
-            <td class="p-2 border-t border-slate-800">${res.time}</td>
-            <td class="p-2 border-t border-slate-800">${res.avgSpeed}</td>
-            <td class="p-2 border-t border-slate-800">${res.maxG}</td>
-            <td class="p-2 border-t border-slate-800">${res.maxTension}</td>
-            <td class="p-2 border-t border-slate-800">${res.deformation}</td>
-            <td class="p-2 border-t border-slate-800">${res.obstacles}</td>
-        `;
+        tr.innerHTML = `<td>${res.level}</td><td>${labelFor(res.controller)}</td><td>${res.mode === 'pure' ? 'cable-only' : 'assisted'}</td>`+
+            `<td>${res.progressY.toFixed(2)}</td><td>${res.speed.toFixed(3)}</td><td class="mono">${res.maxResidual.toExponential(1)}</td>`+
+            `<td>${(100*res.assistShare).toFixed(0)}%</td>`;
         this.tbody.appendChild(tr);
     }
 
     updateLeaderboard() {
-        const sorted = [...this.results].sort((a, b) => parseFloat(b.cps) - parseFloat(a.cps));
-        if (sorted.length > 0) {
-            this.leaderEl.textContent = `${DRIVE_CONTROLLER_LABELS[sorted[0].controller]} (CPS: ${sorted[0].cps})`;
-        }
+        const pure = this.results.filter(r => r.mode === 'pure').sort((a, b) => b.speed-a.speed);
+        if (pure.length && this.leaderEl) this.leaderEl.textContent = `${labelFor(pure[0].controller)} · L${pure[0].level} · ${pure[0].speed.toFixed(3)} m/s`;
+    }
+
+    download(name, contents, type) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([contents], { type }));
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
     exportCSV() {
-        const headers = ['Level', 'Controller', 'Status', 'Distance', 'Time', 'AvgSpeed', 'MaxG', 'MaxTension', 'Deformation', 'CPS'];
-        const rows = this.results.map(r => [r.level, r.controller, r.status, r.distance, r.time, r.avgSpeed, r.maxG, r.maxTension, r.deformation, r.cps].join(','));
-        const csv = [headers.join(','), ...rows].join('\\n');
-        
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'master_benchmark_comparison.csv';
-        a.click();
+        const keys = ['level', 'controller', 'mode', 'duration', 'progressY', 'speed', 'path', 'maxResidual', 'assistShare', 'actuatorEnergy', 'maxBarError', 'tips', 'wallSeconds'];
+        const rows = this.results.map(r => keys.map(key => r[key]).join(','));
+        this.download('physics_audit_batch.csv', [keys.join(','), ...rows].join('\n'), 'text/csv');
     }
 
     exportJSON() {
-        const blob = new Blob([JSON.stringify(this.results, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'master_benchmark_comparison.json';
-        a.click();
+        this.download('physics_audit_batch.json', JSON.stringify(this.results, null, 2), 'application/json');
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function bindBatchButton() {
     const btn = document.getElementById('btn-run-benchmark');
-    if (btn) {
-        btn.addEventListener('click', () => {
-            const runner = new BatchBenchmarkRunner();
-            runner.runAll();
-        });
-    }
-});
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try { await new BatchBenchmarkRunner().runAll(); } finally { btn.disabled = false; }
+    });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindBatchButton);
+else bindBatchButton();
 
 // Expose to window for console/CLI callable entry point
 window.BatchBenchmarkRunner = BatchBenchmarkRunner;
-window.runMasterBenchmark = () => new BatchBenchmarkRunner().runAll();
+window.runMasterBenchmark = options => new BatchBenchmarkRunner(options).runAll();

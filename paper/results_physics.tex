@@ -1,0 +1,30 @@
+Table~\ref{tab:physics} and Fig.~\ref{fig:physics} compare the cores
+under the same SGT command sequence. Three observations stand out.
+\emph{(i) Rigidity.} The DAE core keeps the bar lengths at
+$\pDaeBar$\,m; the penalty+SHAKE core reaches $\pLegacyBar$\,m and, with
+the interactive aids, $\nLegBar$\,m.
+\emph{(ii) Hidden energy exchange.} To keep the bars rigid, the
+penalty+SHAKE core removes $\pLegacyNum$\,J by position projection
+while its cables do a comparable amount of work, i.e.\ the cables
+mostly pump energy into the penalty bars that the projection then
+discards. The DAE core changes only $\pDaeNum$\,J numerically. With the
+original locomotion aids, \pLegacyAidShare\,\% of the energy input comes
+from non-physical forces, which explains its high speed
+(\nLegSpeed\,m/s) in Table~\ref{tab:nominal}.
+\emph{(iii) Drift.} Before correction, both cores show a per-step energy
+mismatch that is first-order discretization error: for seed~1, halving
+$\Delta t$ from 2 to 1\,ms reduces the accumulated $\sum_k|\delta_k|$
+from \dcDaeTwoAbs\ to \dcDaeOneAbs\,J for the DAE core and from
+\dcLegTwoAbs\ to \dcLegOneAbs\,J for penalty+SHAKE, and the largest
+single-step mismatch of the DAE core (at the initial landing) from
+$\dcDaeTwoStep$ to $\dcDaeOneStep$\,J. The energy row removes this
+drift every step, so $\varepsilon$ stays at the solver tolerance
+($\pDaeResidual$\,J). Without the energy row the residual accumulates
+to $\pNoERowResidual$\,J. We stress that the energy row corrects an
+integration error of known order; it does not by itself prove that the
+model is complete---that is the role of $\delta_k$, which would expose
+an unbooked force as a non-convergent drift. On rugged Level~7 the
+corrector occasionally reaches its 10-iteration cap during contact
+transitions, leaving a transient residual of up to
+$4\times10^{-2}$\,J (0.2\,\% of $E$) that is removed in the following
+steps (Table~\ref{tab:terrain}).

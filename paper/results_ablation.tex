@@ -1,0 +1,21 @@
+Table~\ref{tab:ablation} isolates the ingredients of SGT (3 seeds).
+Removing the bars' geometric stiffness is the most harmful change:
+speed drops from \aFullSpeed\ to \aNoGeoSpeed\,m/s, success to
+\aNoGeoSuccess\,\% and the cost of transport nearly doubles
+(\aNoGeoCot\ vs.\ \aFullCot), confirming that the softening of the
+compressed bars is what the sensitivity has to capture. The other design
+choices did not help in our tests: without payload actuation the speed
+is essentially unchanged (\aNoPayloadSpeed\,m/s) at a lower cost of
+transport (\aNoPayloadCot); restricting the command to the 8 most
+sensitive cables keeps the speed (\aSparseSpeed\,m/s) and gives the
+lowest cost of transport (\aSparseCot); and choosing the edge by
+alignment with the travel direction instead of by reachable margin was
+not worse (\aNoFeasSpeed\,$\pm$\,\aNoFeasSpeedStd\,m/s). With three
+seeds these differences are within one standard deviation, so we report
+the margin-based rule as specified before the experiments and leave the
+sparse, payload-free variant as the more efficient configuration. Run
+on the penalty+SHAKE core without aids, the same controller reaches only
+\aLegacySpeed\,m/s: the projection that absorbs the cable work also
+absorbs the deformation that SGT relies on. Across terrains
+(Table~\ref{tab:terrain}) SGT keeps \gFourSpeed\,m/s on Level~4 and
+\gSevenSpeed\,m/s on Level~7 with 100\,\% success.

@@ -1,0 +1,15 @@
+Table~\ref{tab:stress} and Fig.~\ref{fig:robust} summarize the stress
+tests (3 seeds each). SGT keeps rolling after a 0.5\,m/s lateral impulse
+(\sImpSpeed\,m/s) and under a 10\,N, 2\,s push (\sPushSpeed\,m/s), and
+is insensitive to $-40\,\%$ friction (\sFricSpeed\,m/s) and $+30\,\%$
+payload mass (\sMassSpeed\,m/s). Softer cables ($-20\,\%$) slow it to
+\sStiffSpeed\,m/s because the same stroke produces smaller COM shifts,
+and a 100\,ms actuation delay to \sDelaySpeed\,m/s
+(\sDelaySuccess\,\% success). Measurement noise is the main weakness:
+Gaussian noise reduces the speed to \sGaussSpeed\,m/s, while
+heavy-tailed noise is damaging---Laplace noise to \sLapSpeed\,m/s
+(\sLapSuccess\,\% success) and 2\,\% outliers to \sOutSpeed\,m/s. SGT uses
+the measured node positions both to detect the support face and to
+assemble $\vect K$, so a single corrupted node can trigger a wrong face
+or edge; a robust state estimator in front of the planner is required
+before hardware use.

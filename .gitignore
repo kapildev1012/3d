@@ -1,0 +1,16 @@
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+
+# build output and local benchmark records (kept per machine)
+dist/
+data/
+.vercel/
+node_modules/

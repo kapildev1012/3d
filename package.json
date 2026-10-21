@@ -1,11 +1,20 @@
 {
   "name": "ntrtsim-3d-tensegrity-live",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
   "type": "module",
+  "engines": { "node": ">=18" },
   "scripts": {
-    "dev": "python3 -m http.server 3000 --bind 127.0.0.1",
-    "build": "node --check js/abExperiment.js && node --check js/adaptiveLearning.js && node --check js/driveControllers.js && node --check js/monitoringSystem.js && node --check js/simEngine.js && node --check js/visualizer.js && node --check js/app.js && npm test",
-    "preview": "python3 -m http.server 3000 --bind 127.0.0.1",
-    "test": "node --test tests/*.test.mjs"
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "build": "node tools/build.mjs",
+    "preview": "ROOT=dist node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:research": "node --test tests/lagrangianDae.test.mjs tests/researchMode.test.mjs tests/benchmarkStore.test.mjs",
+    "verify": "npm run build && npm test",
+    "seed": "node tools/make_seed_benchmarks.mjs --duration 20",
+    "experiments": "node tools/run_experiments.mjs --workers 2 --duration 20",
+    "paper:data": "node tools/summarize_experiments.mjs && node tools/make_numbers.mjs && python3 tools/make_figures.py",
+    "paper:pdf": "cd paper && latexmk -pdf -interaction=nonstopmode main.tex"
   }
 }

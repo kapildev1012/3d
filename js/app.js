@@ -2,26 +2,29 @@
  * APP.JS - Main Coordinator for 6-Bar Tensegrity Icosahedron Rover Simulator
  */
 
-import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer, BenchmarkEngine } from './simEngine.js?v=20260822-grip1';
-import { relaxedCableTension } from './driveControllers.js?v=20260822-grip1';
-import { Visualizer } from './visualizer.js?v=20260822-grip1';
-import { AdaptiveRouteLearner, LEVEL14_LEARNING_DEFAULTS } from './adaptiveLearning.js?v=20260822-grip1';
+import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer } from './simEngine.js?v=20261021-ws1';
+import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
+import { Visualizer } from './visualizer.js?v=20261021-ws1';
+import { AdaptiveRouteLearner, LEVEL14_LEARNING_DEFAULTS } from './adaptiveLearning.js?v=20261021-ws1';
 import {
   bothModelsReachedGoals,
   canStartNextTrainingAttempt,
   currentTrainingAttemptNumber
-} from './trainingCycle.js?v=20260822-grip1';
+} from './trainingCycle.js?v=20261021-ws1';
+import { BenchmarkPersistence } from './benchmarkPersistence.js?v=20261021-ws1';
+import { RunRecorder } from './runRecorder.js?v=20261021-ws1';
+import { BenchmarkMatrix } from './benchmarkMatrix.js?v=20261021-ws1';
+import { AutoBenchmark } from './autoBenchmark.js?v=20261021-ws1';
+import { runsForLevel, toCSV, emptyState } from './benchmarkCore.js?v=20261021-ws1';
+import { LEVELS, configureLevel, levelName } from './levels.js?v=20261021-ws1';
+import { renderFigures } from './figures.js?v=20261021-ws1';
 import {
-  clearRecords,
-  formatRecordCell,
-  formatSnapshotStatus,
-  getExperimentSnapshot,
-  loadRecords,
-  recordRun,
-  saveExperimentSnapshot,
-  saveRecords,
-  summarizeForExperiment
-} from './experimentRecords.js?v=20260822-grip1';
+  bindNumericInputs, syncNumericInputs, bindDockTabs, trackToolbarHeight, readUrlState, writeUrlState
+} from './uiBindings.js?v=20261021-ws1';
+import { EXPERIMENT_SCHEMA, validateObject, validateSettingsFile } from './configSchema.js?v=20261021-ws1';
+import { SCENARIOS } from './experimentProtocol.js?v=20261021-ws1';
+import { BenchmarkPanel } from './benchmarkPanel.js?v=20261021-ws1';
+import { installMatlabTheme, setChartTheme, matlabLineOptions, matlabLine, xy, exportChartPNG, exportChartCSV, exportChartIEEE } from './matlabCharts.js?v=20261021-ws1';
 
 const Chart = window.Chart;
 
@@ -52,24 +55,7 @@ function downloadText(filename, contents, mimeType = 'text/csv;charset=utf-8') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const EXPERIMENT_NAMES = [
-  "Level 1: Rough Mars Sand Flats → Forward Rolling",
-  "Level 2: Mars Small-Rock Field",
-  "Level 3: Mars Boulder Field Rolling",
-  "Level 4: Rocky Ridge Climb & Roll Over",
-  "Level 5: Eroded Mars Crater Escape",
-  "Level 6: Sandy Mars Slope Uphill Roll (18°)",
-  "Level 7: Irregular Mars Mountain Landscape",
-  "Level 8: Mixed-Size Boulder Scatter",
-  "Level 9: Mars Marsh Wetlands",
-  "Level 10: Learned Mars A-vs-B Mission",
-  "Level 11: Uneven Rubble Field",
-  "Level 12: Mars Bog & Boulder Gauntlet",
-  "Level 13: Extreme Mars Composite",
-  "Level 14: 1km² Open-World Mars Expedition"
-];
-
-const MARS_ROUGHNESS_BY_LEVEL = [0, 0.035, 0.05, 0.07, 0.09, 0.075, 0.06, 0.10, 0.10, 0.06, 0.06, 0.14, 0.11, 0.15, 0.18];
+const ALLOWED_SPEEDS = [0.25, 0.5, 1, 2, 4, 10];
 
 class App {
   constructor(centralSettings = {}) {
@@ -84,11 +70,37 @@ class App {
     this.lastPersistedLearningRevision = -1;
     this.centralSettings = centralSettings || {};
 
+    // Persistent benchmark store: synchronous localStorage hydration first,
+    // so the matrix is complete on the very first paint.
+    this.suspendUrlSync = true; // applyUrlState() writes the URL once at the end
+    this.persistence = new BenchmarkPersistence({
+      onChange: () => { this.matrix?.render(); this.updateStorageStatus(); }
+    });
+    this.persistence.hydrateSync();
+
+    renderFigures(document);
+    this.renderLevelOptions();
     this.initSimulation();
     this.initVisualizer();
     this.initCharts();
+    this.benchmarkPanel = new BenchmarkPanel(Chart, charts => { this.benchmarkCharts = charts; });
     this.initMonitoringControls();
+
+    this.recorder = new RunRecorder(this, this.persistence);
+    this.autoBenchmark = new AutoBenchmark(this);
+    this.matrix = new BenchmarkMatrix({
+      body: document.getElementById('experiments-table-body'),
+      total: document.getElementById('records-total'),
+      getState: () => this.persistence.state,
+      getLive: () => this.liveMatrixState(),
+      onSelectLevel: level => this.selectLevel(level),
+      onExportLevel: (level, format) => this.exportLevel(level, format)
+    });
+
     this.bindEvents();
+    bindNumericInputs();
+    trackToolbarHeight();
+    this.showDock = bindDockTabs({ onShow: () => this.resizeVisibleCharts() });
 
     // Graph refresh cadence in physics steps. A non-positive
     // chartUpdateSeconds means true real-time: redraw on every rendered frame.
@@ -98,24 +110,193 @@ class App {
       ? Math.max(1, Math.round(chartUpdateSeconds/this.cfg.dt))
       : 1;
 
-    // Start rendering immediately. The controlled A-vs-B table is populated
-    // from the live solver; the benchmark matrix hydrates from persisted
-    // per-experiment snapshots instead of starting blank every refresh.
-    this.recordsStore = loadRecords(window.localStorage);
-    const storedBenchmark = this.recordsStore?.snapshots?.benchmark?.results;
-    this.benchmarkData = Array.isArray(storedBenchmark) ? storedBenchmark : [];
-    this.lastSnapshotFlush = performance.now();
-    // Flush the latest live metrics when the tab is hidden or closed so a
-    // refresh never loses the current experiment's data.
-    window.addEventListener('pagehide', () => this.captureLiveSnapshots());
-    window.addEventListener('beforeunload', () => this.captureLiveSnapshots());
-    this.recordedTokens = new WeakMap();
-    this.updateRecordsSummary();
-    this.updateMetricsTable();
+    // Closing or refreshing the tab commits the open run to every layer.
+    const onLeave = () => {
+      this.recorder.commit('unload');
+      this.persistence.flushOnUnload();
+    };
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('beforeunload', onLeave);
+
+    this.updateViewportHeader();
+    this.matrix.render();
+    this.updateStorageStatus();
     // Sync the top-bar preset dropdown, sidebar slider and readout with the
     // configured starting gravity (Earth by default).
     this.setGravity(Math.abs(this.cfg.gravity?.[2] ?? 9.81), { source: 'init' });
+    // IndexedDB + disk file + seed (async); the matrix re-renders on merge.
+    this.persistence.hydrateAsync().then(() => this.updateStorageStatus());
     requestAnimationFrame(t => this.animationLoop(t));
+  }
+
+  renderLevelOptions() {
+    const select = document.getElementById('select-experiment');
+    if (!select) return;
+    select.innerHTML = LEVELS.map(level =>
+      `<option value="${level.id}">L${level.id} · ${level.name}</option>`).join('');
+    select.value = '10';
+  }
+
+  /** Live metrics of the active level for the matrix's ACTIVE LIVE row. */
+  liveMatrixState() {
+    const m = this.simB?.metrics;
+    const active = this.recorder?.activeRun;
+    let status = 'ACTIVE LIVE';
+    if (!active) {
+      const last = this.recorder?.lastFinalized;
+      if (this.recorder?.awaitingReset && last?.level === this.cfg.experimentId) {
+        status = last.status === 'completed' ? 'COMPLETED' : last.status === 'failed' ? 'FAILED' : 'INCOMPLETE';
+      } else if (!(this.simB?.t > 0)) {
+        status = 'NOT RUN';
+      }
+    } else if (!this.isPlaying) {
+      status = 'PAUSED';
+    }
+    return {
+      level: this.cfg.experimentId,
+      status,
+      obstacles: this.obstacleCount(),
+      metrics: m && this.simB.t > 0 ? {
+        distance: m.distanceTraveled, time: m.timeElapsed, avgSpeed: m.avgVelocity,
+        maxG: m.payloadAccelMax, maxTension: m.maxCableTension, deformation: m.shapeDeformationMax
+      } : null
+    };
+  }
+
+  obstacleCount() {
+    const terrain = this.terrain;
+    if (!terrain) return null;
+    if (terrain.course) return terrain.course.obstacles.length;
+    if (terrain.expeditionObstacles?.length) return terrain.expeditionObstacles.length;
+    return (terrain.rocks || []).filter(rock => rock.kind === 'challenge').length;
+  }
+
+  /** Single entry point for play/pause; pause commits a durable checkpoint. */
+  setPlaying(playing, { record = true } = {}) {
+    this.isPlaying = Boolean(playing);
+    const button = document.getElementById('btn-play-pause');
+    if (button) button.textContent = this.isPlaying ? 'Pause' : 'Play';
+    document.body.classList.toggle('is-paused', !this.isPlaying);
+    if (!this.isPlaying && record) this.recorder?.checkpoint('pause');
+    this.lastFrameTime = performance.now();
+    this.accumulatedTime = 0;
+  }
+
+  /** Commit the open run, then restart both rovers from the start line. */
+  resetRovers(reason = 'reset') {
+    this.recorder?.commit(reason);
+    this.simA.reset();
+    this.simB.reset();
+    this.accumulatedTime = 0;
+    this.lastChartStep = 0;
+    this.learningRestartAt = null;
+  }
+
+  selectLevel(level) {
+    if (this.autoBenchmark?.running) { this.showNotice('Auto-benchmark running: stop it to choose a level.', 'warn'); return; }
+    if (level === this.cfg.experimentId) { this.showDock?.('matrix'); return; }
+    this.loadExperiment(level);
+    this.syncPhysicsControls();
+    this.showNotice(`Loaded ${levelName(level)}`, 'ok');
+  }
+
+  updateViewportHeader() {
+    const level = LEVELS[this.cfg.experimentId-1];
+    const title = document.getElementById('txt-active-experiment-title');
+    if (title) title.textContent = levelName(this.cfg.experimentId);
+    const sub = document.getElementById('txt-active-terrain');
+    if (sub) sub.textContent = level ? level.terrain : '';
+    const core = document.getElementById('chip-core');
+    if (core) core.textContent = this.cfg.physicsCore === 'dae' ? 'Lagrangian DAE' : 'legacy SHAKE';
+    const act = document.getElementById('chip-actuation');
+    if (act) act.textContent = this.cfg.pureCableActuation ? 'cable-only' : 'assisted';
+  }
+
+  updateStorageStatus() {
+    const chip = document.getElementById('storage-status');
+    if (!chip || !this.persistence) return;
+    const s = this.persistence.status;
+    const server = { disk: 'disk', 'read-only': 'disk read-only', 'browser-only': 'browser only', offline: 'no server', pending: '…' }[s.server] || s.server;
+    chip.textContent = `records: ${server}${s.idb === 'ok' ? ' · IndexedDB' : ''}${s.local === 'ok' ? ' · local' : ''}`;
+    chip.title = `Local storage: ${s.local} · IndexedDB: ${s.idb} · server: ${s.server}${s.serverReason ? ` (${s.serverReason})` : ''}`+
+      `${s.lastServerSync ? ` · last disk sync ${new Date(s.lastServerSync).toLocaleTimeString()}` : ''}${s.seeded ? ' · seeded from public/default_benchmarks.json' : ''}`;
+    chip.classList.toggle('is-ok', s.server === 'disk');
+    chip.classList.toggle('is-warn', s.server !== 'disk');
+  }
+
+  updateRunChip() {
+    const chip = document.getElementById('chip-run');
+    if (!chip) return;
+    const run = this.recorder?.activeRun;
+    const text = run ? `REC ${run.id.slice(-6)} · ${run.checkpoints} cp` : (this.recorder?.awaitingReset ? 'run committed' : 'run —');
+    if (chip.textContent !== text) chip.textContent = text;
+  }
+
+  /** Current setup as shareable URL parameters. */
+  syncUrl() {
+    if (this.suspendUrlSync) return null;
+    return writeUrlState({
+      level: this.cfg.experimentId,
+      gait: this.cfg.actuationMode,
+      controller: this.cfg.controllerMode || 'natural_support_face',
+      core: this.cfg.physicsCore,
+      act: this.cfg.pureCableActuation ? 'pure' : 'assisted',
+      g: Number(Math.abs(this.cfg.gravity?.[2] ?? 9.81).toFixed(3)),
+      speed: this.simSpeed,
+      cam: document.getElementById('select-camera')?.value || 'chase'
+    });
+  }
+
+  /** Apply ?level=&gait=&controller=&core=&act=&g=&speed=&cam=&preset= on startup. */
+  applyUrlState(state = readUrlState()) {
+    this.suspendUrlSync = true;
+    try {
+      if (state.preset === 'research') {
+        this.loadExperiment(state.level || 1, { reason: 'preset' });
+        this.cfg.applyResearchProfile();
+        this.simA.reset(); this.simB.reset();
+      } else if (state.level && state.level !== this.cfg.experimentId) {
+        this.loadExperiment(state.level, { reason: 'url' });
+      }
+      const set = (id, value) => { const el = document.getElementById(id); if (el && value !== undefined && value !== null) el.value = value; };
+      let rebuild = false;
+      if (state.core === 'dae' || state.core === 'legacy') { rebuild ||= this.cfg.physicsCore !== state.core; this.cfg.physicsCore = state.core; }
+      if (state.act === 'pure' || state.act === 'assisted') {
+        const pure = state.act === 'pure';
+        rebuild ||= this.cfg.pureCableActuation !== pure;
+        this.cfg.pureCableActuation = pure;
+      }
+      if (state.controller && document.querySelector(`#select-controller option[value="${CSS.escape(state.controller)}"]`)) {
+        rebuild ||= this.cfg.controllerMode !== state.controller;
+        this.cfg.controllerMode = state.controller;
+      }
+      if (rebuild) { this.simA.reset(); this.simB.reset(); }
+      if (state.gait && document.querySelector(`#select-gait-mode option[value="${CSS.escape(state.gait)}"]`)) {
+        this.cfg.actuationMode = state.gait; set('select-gait-mode', state.gait);
+      }
+      if (state.g !== null) this.setGravity(state.g, { source: 'url' });
+      if (state.speed !== null && ALLOWED_SPEEDS.includes(state.speed)) { this.simSpeed = state.speed; set('select-speed', String(state.speed)); }
+      if (state.cam && ['chase', 'orbit', 'top', 'side'].includes(state.cam)) { set('select-camera', state.cam); this.vis.setCameraMode(state.cam); }
+      if (state.tab) this.showDock?.(state.tab);
+      this.syncPhysicsControls();
+    } finally {
+      this.suspendUrlSync = false;
+    }
+    this.syncUrl();
+  }
+
+  exportLevel(level, format) {
+    const state = { ...emptyState(), runs: runsForLevel(this.persistence.state, level) };
+    if (format === 'json') downloadText(`level${level}_runs.json`, JSON.stringify(state, null, 2), 'application/json;charset=utf-8');
+    else downloadText(`level${level}_runs.csv`, toCSV(state));
+  }
+
+  resizeVisibleCharts() {
+    requestAnimationFrame(() => {
+      for (const chart of Object.values(window.Chart?.instances || {})) {
+        if (chart.canvas?.offsetParent) chart.resize();
+      }
+    });
   }
 
   initSimulation() {
@@ -174,204 +355,101 @@ class App {
   }
 
   initCharts() {
-    // 1. Core Acceleration G-Force Chart
-    const ctxG = document.getElementById('chart-gforce').getContext('2d');
-    this.chartG = new Chart(ctxG, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label: 'Payload Core G-Force [G]',
-            data: [],
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16, 185, 129, 0.15)',
-            fill: true,
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.2
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        scales: {
-          x: { title: { display: true, text: 'Time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { title: { display: true, text: 'Payload Accel [G]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, min: 0 }
-        },
-        plugins: { legend: { labels: { color: '#f8fafc' } } }
-      }
-    });
+    installMatlabTheme(Chart);
+    setChartTheme('dark', Chart);
+    const make = (id, type, datasets, options) => {
+      const element = document.getElementById(id);
+      if (!element) return null;
+      return new Chart(element.getContext('2d'), { type, data: { datasets }, options });
+    };
+    const L = matlabLine;
 
-    // 2. Velocity & Deformation Profile Chart
-    const ctxV = document.getElementById('chart-velocity').getContext('2d');
-    this.chartV = new Chart(ctxV, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label: 'Rolling Velocity — 1 s mean [m/s]',
-            data: [],
-            borderColor: '#06b6d4',
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.35
-          },
-          {
-            label: 'Procrustes RMS — 1 s mean [m]',
-            data: [],
-            borderColor: '#f59e0b',
-            borderWidth: 2,
-            borderDash: [4, 4],
-            pointRadius: 0,
-            tension: 0.35
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        scales: {
-          x: { title: { display: true, text: 'Time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { title: { display: true, text: 'Speed / RMS [fixed scale]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, min: 0, max: 1.40 }
-        },
-        plugins: { legend: { labels: { color: '#f8fafc' } } }
-      }
-    });
+    // --- Mission ------------------------------------------------------------
+    this.chartG = make('chart-gforce', 'line', [
+      L('Payload core |a| (1 s mean)', 0)
+    ], matlabLineOptions({ yLabel: 'Proper acceleration (g)', beginAtZero: true }));
 
-    const ctxControl = document.getElementById('chart-control').getContext('2d');
-    this.chartControl = new Chart(ctxControl, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          { label: 'Control Cost', data: [], borderColor: '#8b5cf6', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y' },
-          { label: 'Rod Residual [mm]', data: [], borderColor: '#10b981', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y' },
-          { label: 'Relaxed Cables [%]', data: [], borderColor: '#e879f9', borderWidth: 2, pointRadius: 0, borderDash: [4, 4], tension: 0.2, yAxisID: 'yPercent' }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        scales: {
-          x: { title: { display: true, text: 'Time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { position: 'left', beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          yPercent: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { color: '#e879f9' } }
-        },
-        plugins: { legend: { labels: { color: '#f8fafc' } } }
-      }
-    });
+    this.chartV = make('chart-velocity', 'line', [
+      L('Planar speed (m/s)', 0),
+      L('Shell deformation RMS (m)', 1, { borderDash: [6, 4] })
+    ], matlabLineOptions({ yLabel: 'Speed (m/s), RMS (m)', beginAtZero: true }));
 
-    const ctxForce = document.getElementById('chart-force-law').getContext('2d');
-    this.chartForce = new Chart(ctxForce, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          { label: 'Standard Linear Tension [N]', data: [], borderColor: '#06b6d4', borderWidth: 2, pointRadius: 0 },
-          { label: 'Adaptive Relaxing Tension [N]', data: [], borderColor: '#e879f9', borderWidth: 2, pointRadius: 0 }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        scales: {
-          x: { title: { display: true, text: 'Cable length / base rest length', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { title: { display: true, text: 'Tension [N]', color: '#94a3b8' }, beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
-        },
-        plugins: { legend: { labels: { color: '#f8fafc' } } }
-      }
-    });
+    this.chartControl = make('chart-control', 'line', [
+      L('Model A (baseline)', 0),
+      L('Model B (adaptive)', 1)
+    ], matlabLineOptions({ yLabel: 'max_k | ‖b_k‖ − l_k | (m)', yLog: true, legend: 'southeast' }));
+
+    this.chartForce = make('chart-force-law', 'line', [
+      L('Linear tension', 0),
+      L('Hermite relaxing tension', 1)
+    ], matlabLineOptions({ xLabel: 'Cable length / rest length (-)', yLabel: 'Tension (N)', beginAtZero: true, legend: 'northwest' }));
     this.updateForceLawChart();
+
+    // --- Physics audit (Lagrangian DAE + work ledger) -------------------------
+    this.chartLedger = make('chart-energy-ledger', 'line', [
+      L('Cables (actuation + elastic)', 0),
+      L('Ground contact', 1),
+      L('Drag', 2),
+      L('Assists (couple, traction, grip, corridor, virtual)', 3),
+      L('Constraint projection / corrector', 6, { borderDash: [6, 4] })
+    ], matlabLineOptions({ yLabel: 'Cumulative work W(t) (J)', legend: 'northwest' }));
+
+    this.chartResidual = make('chart-energy-residual', 'line', [
+      L('Model A', 0),
+      L('Model B', 1)
+    ], matlabLineOptions({ yLabel: '|E(t) − E₀ − ΣW(t)| (J)', yLog: true, legend: 'southeast' }));
+
     this.initMonitoringCharts();
+    this.chartRegistry = {
+      'goal-error': this.chartGoalError, 'formation-error': this.chartFormationError,
+      'cable-delta': this.chartCableDelta, 'cable-force': this.chartCableForce,
+      'cable-bars': this.chartCableBars, 'contact-count': this.chartContactCount,
+      'com-path': this.chartComPath, gforce: this.chartG, velocity: this.chartV,
+      control: this.chartControl, 'force-law': this.chartForce,
+      'energy-ledger': this.chartLedger, 'energy-residual': this.chartResidual
+    };
   }
 
   initMonitoringCharts() {
-    const timeOptions = yTitle => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      normalized: true,
-      scales: {
-        x: { title: { display: true, text: 'Simulation time [s]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 8 } },
-        y: { title: { display: true, text: yTitle, color: '#94a3b8' }, beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
-      },
-      plugins: { legend: { labels: { color: '#e2e8f0' } } }
-    });
-    const createLineChart = (id, datasets, yTitle) => new Chart(document.getElementById(id).getContext('2d'), {
-      type: 'line',
-      data: { labels: [], datasets },
-      options: timeOptions(yTitle)
-    });
-    const line = (label, color, extras = {}) => ({
-      label, data: [], borderColor: color, backgroundColor: `${color}22`,
-      borderWidth: 2, pointRadius: 0, tension: 0.2, ...extras
-    });
-    this.chartGoalError = createLineChart('chart-goal-error', [
-      line('Goal error [m]', '#22d3ee', { fill: true }),
-      line('Success threshold', '#22c55e', { borderDash: [6, 4], borderWidth: 1 })
-    ], 'Distance to Goal B [m]');
-    this.chartFormationError = createLineChart('chart-formation-error', [
-      line('Formation RMS [m]', '#a78bfa', { fill: true }),
-      line('Warning threshold', '#f97316', { borderDash: [6, 4], borderWidth: 1 })
-    ], 'Rigid-aligned RMS error [m]');
-    this.chartCableDelta = createLineChart('chart-cable-delta', [
-      line('Selected cable ΔL [m]', '#facc15'),
-      line('Zero extension', '#64748b', { borderDash: [4, 4], borderWidth: 1 })
-    ], 'Cable length change [m]');
-    this.chartCableForce = createLineChart('chart-cable-force', [
-      line('Selected cable [N]', '#fb7185'),
-      line('All-cable average [N]', '#38bdf8'),
-      line('Overload limit [N]', '#ef4444', { borderDash: [6, 4], borderWidth: 1 })
-    ], 'Tension force [N]');
-    this.chartContactCount = createLineChart('chart-contact-count', [
-      line('Active contacts', '#f97316', { stepped: true, fill: true })
-    ], 'Active node / rod contacts');
-    this.chartComPath = new Chart(document.getElementById('chart-com-path').getContext('2d'), {
-      type: 'scatter',
-      data: { datasets: [
-        { label: 'COM trajectory', data: [], showLine: true, borderColor: '#22d3ee', backgroundColor: '#22d3ee', borderWidth: 2, pointRadius: 0 },
-        { label: 'Start A', data: [], backgroundColor: '#38bdf8', pointRadius: 6 },
-        { label: 'Goal B', data: [], backgroundColor: '#22c55e', pointRadius: 7, pointStyle: 'rectRot' },
-        { label: 'Obstacles', data: [], backgroundColor: '#f59e0b88', borderColor: '#f59e0b', pointRadius: 5 }
-      ] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        scales: {
-          x: { title: { display: true, text: 'World X [m]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { title: { display: true, text: 'World Y [m]', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
-        },
-        plugins: { legend: { labels: { color: '#e2e8f0' } } }
-      }
-    });
-    this.chartCableBars = new Chart(document.getElementById('chart-cable-bars').getContext('2d'), {
-      type: 'bar',
-      data: { datasets: [
-        {
-          label: 'Tension [N]', data: [], backgroundColor: [], borderWidth: 0,
-          barPercentage: 1.0, categoryPercentage: 0.92
-        },
-        {
-          type: 'line', label: 'Overload limit [N]', data: [],
-          borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5,
-          pointRadius: 0, fill: false
-        }
-      ] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
-        scales: {
-          x: { title: { display: true, text: 'Cable ID', color: '#94a3b8' }, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxRotation: 90, autoSkip: false } },
-          y: { title: { display: true, text: 'Tension force [N]', color: '#94a3b8' }, beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
-        },
-        plugins: { legend: { labels: { color: '#e2e8f0' } } }
-      }
-    });
+    const make = (id, type, datasets, options) => {
+      const element = document.getElementById(id);
+      if (!element) return null;
+      return new Chart(element.getContext('2d'), { type, data: { datasets }, options });
+    };
+    const L = matlabLine;
+    this.chartGoalError = make('chart-goal-error', 'line', [
+      L('||Goal - COM(t)||', 0),
+      L('Success threshold', 1, { borderDash: [6, 4], borderWidth: 1 })
+    ], matlabLineOptions({ yLabel: 'Distance to goal (m)', beginAtZero: true }));
+    this.chartFormationError = make('chart-formation-error', 'line', [
+      L('Rigid-aligned RMS', 0),
+      L('Warning threshold', 1, { borderDash: [6, 4], borderWidth: 1 })
+    ], matlabLineOptions({ yLabel: 'Formation error (m)', beginAtZero: true }));
+    this.chartCableDelta = make('chart-cable-delta', 'line', [
+      L('Selected cable ΔL', 0),
+      L('Zero', 7, { borderDash: [3, 3], borderWidth: 1, borderColor: '#808080', hideInLegend: true })
+    ], matlabLineOptions({ yLabel: 'Length change (m)' }));
+    this.chartCableForce = make('chart-cable-force', 'line', [
+      L('Selected cable', 0),
+      L('Mean of 24 cables', 1),
+      L('Overload limit', 6, { borderDash: [6, 4], borderWidth: 1 })
+    ], matlabLineOptions({ yLabel: 'Tension (N)', beginAtZero: true }));
+    this.chartContactCount = make('chart-contact-count', 'line', [
+      L('Active contacts', 0, { stepped: true })
+    ], matlabLineOptions({ yLabel: 'Contacts (-)', beginAtZero: true, yTicks: { stepSize: 1, precision: 0 } }));
+    this.chartComPath = make('chart-com-path', 'scatter', [
+      { ...L('COM trajectory', 0), showLine: true },
+      { ...L('Start A', 4), showLine: false, pointRadius: 5 },
+      { ...L('Goal B', 1), showLine: false, pointRadius: 6, pointStyle: 'rectRot' },
+      { ...L('Obstacles', 2), showLine: false, pointRadius: 4 }
+    ], matlabLineOptions({ xLabel: 'x (m)', yLabel: 'y (m)', legend: 'southeast' }));
+    const barOptions = matlabLineOptions({ xLabel: 'Cable', yLabel: 'Tension (N)', beginAtZero: true });
+    barOptions.scales.x.type = 'category';
+    barOptions.scales.x.ticks = { ...barOptions.scales.x.ticks, autoSkip: false, maxRotation: 90, maxTicksLimit: 30, font: { size: 9 } };
+    this.chartCableBars = make('chart-cable-bars', 'bar', [
+      { label: 'Tension', data: [], backgroundColor: [], borderWidth: 0, barPercentage: 0.9, categoryPercentage: 0.9 },
+      { type: 'line', ...L('Overload limit', 6, { borderDash: [6, 4], borderWidth: 1 }) }
+    ], barOptions);
   }
 
   initMonitoringControls() {
@@ -393,68 +471,16 @@ class App {
   updateForceLawChart() {
     if (!this.chartForce || !this.rover?.l0_outerStrings?.length) return;
     const base = this.rover.l0_outerStrings[0];
-    const labels = [];
     const standard = [];
     const adaptive = [];
-    for (let ratio = 0.90; ratio <= 1.60 + 1e-9; ratio += 0.02) {
+    for (let ratio = 0.90; ratio <= 1.60 + 1e-9; ratio += 0.01) {
       const ell = base * ratio;
-      labels.push(ratio.toFixed(2));
-      standard.push(this.cfg.kS * Math.max(0, ell-base));
-      adaptive.push(relaxedCableTension(ell, base, base, Object.assign({}, this.cfg, { stringRelaxation: true })).tension);
+      standard.push({ x: ratio, y: this.cfg.kS * Math.max(0, ell-base) });
+      adaptive.push({ x: ratio, y: relaxedCableTension(ell, base, base, Object.assign({}, this.cfg, { stringRelaxation: true })).tension });
     }
-    this.chartForce.data.labels = labels;
     this.chartForce.data.datasets[0].data = standard;
     this.chartForce.data.datasets[1].data = adaptive;
     this.chartForce.update('none');
-  }
-
-  runFullBenchmark() {
-    this.benchmarkData = BenchmarkEngine.runAllExperiments(this.cfg);
-    // Persist the full 14-experiment benchmark so the matrix keeps it across
-    // refreshes instead of reverting to NOT RUN.
-    if (this.recordsStore) {
-      this.recordsStore.snapshots = this.recordsStore.snapshots || {};
-      this.recordsStore.snapshots.benchmark = {
-        results: this.benchmarkData,
-        updatedAt: new Date().toISOString()
-      };
-      saveRecords(window.localStorage, this.recordsStore);
-    }
-    this.updateMetricsTable();
-  }
-
-  /** Latest live Model B metrics of the active experiment, snapshot-ready. */
-  buildSnapshotPayload() {
-    const metrics = this.simB?.metrics;
-    if (!metrics) return null;
-    return {
-      terrainLevel: this.cfg.terrainLevel,
-      gravity: Math.abs(this.cfg.gravity?.[2] ?? 9.81),
-      controllerShort: this.constructor.controllerShortLabel(
-        this.cfg.controllerMode || 'natural_support_face'),
-      modelLabel: 'Model B',
-      distance: Number.isFinite(metrics.distanceTraveled) ? metrics.distanceTraveled : 0,
-      elapsed: Number.isFinite(metrics.timeElapsed) ? metrics.timeElapsed : 0,
-      avgVelocity: Number.isFinite(metrics.avgVelocity) ? metrics.avgVelocity : 0,
-      maxG: Number.isFinite(metrics.payloadAccelMax) ? metrics.payloadAccelMax : null,
-      maxTension: Number.isFinite(metrics.maxCableTension) ? metrics.maxCableTension : null,
-      deformation: Number.isFinite(metrics.shapeDeformationMax) ? metrics.shapeDeformationMax : null,
-      obstacles: this.terrain.course
-        ? this.terrain.course.obstacles.length
-        : (Number.isFinite(this.terrain.expeditionObstacles?.length)
-          ? this.terrain.expeditionObstacles.length : null),
-      outcome: metrics.runOutcome || 'running',
-      updatedAt: new Date().toISOString()
-    };
-  }
-
-  /** Write the current experiment's live data into the persistent store. */
-  captureLiveSnapshots() {
-    if (!this.recordsStore || !this.simB) return;
-    const payload = this.buildSnapshotPayload();
-    if (!payload) return;
-    saveExperimentSnapshot(this.recordsStore, this.cfg.experimentId, payload);
-    saveRecords(window.localStorage, this.recordsStore);
   }
 
   handleAdaptiveLearningCycle(now) {
@@ -493,22 +519,33 @@ class App {
       this.accumulatedTime = (this.accumulatedTime || 0) + targetSimDelta;
 
       let safetyGuard = 0;
-      while (this.accumulatedTime >= this.cfg.dt && safetyGuard < 400) {
+      const frameStart = performance.now();
+      // Budget ~24 ms of physics per frame; if the machine cannot keep up,
+      // drop the backlog instead of letting it grow (spiral of death).
+      while (this.accumulatedTime >= this.cfg.dt && safetyGuard < 400 && performance.now()-frameStart < 24) {
         if (this.simA.t < this.cfg.T_end && !this.simA.metrics.runTerminal) this.simA.step();
         if (this.simB.t < this.cfg.T_end && !this.simB.metrics.runTerminal) this.simB.step();
         this.accumulatedTime -= this.cfg.dt;
         safetyGuard++;
       }
+      if (this.accumulatedTime > 4*this.cfg.dt) this.accumulatedTime = 0;
+      const simulated = safetyGuard*this.cfg.dt;
+      this.rtfFilter = 0.9*(this.rtfFilter ?? 1)+0.1*(realDeltaSec > 0 ? simulated/realDeltaSec : 1);
+      if (now-(this.lastRtfPaint || 0) > 500) {
+        this.lastRtfPaint = now;
+        const rtf = document.getElementById('sim-rtf');
+        if (rtf) rtf.textContent = `${this.rtfFilter.toFixed(2)}×`;
+      }
     }
 
     this.handleAdaptiveLearningCycle(now);
-    this.captureRunOutcomes();
-
-    // Persist the live experiment's metrics every few seconds so a refresh
-    // keeps all previous terrain data in the metrics matrix.
-    if (now-this.lastSnapshotFlush >= 5000) {
-      this.lastSnapshotFlush = now;
-      this.captureLiveSnapshots();
+    // Run recording: checkpoint every 1 s of simulated time, commit on outcome.
+    this.recorder.tick();
+    // Live matrix row + run chip at 4 Hz (full re-render only on store changes).
+    if (now-(this.lastMatrixPaint || 0) > 250) {
+      this.lastMatrixPaint = now;
+      this.matrix.updateLive();
+      this.updateRunChip();
     }
 
     // Render 3D Scene Dual
@@ -531,53 +568,6 @@ class App {
       ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC'
     };
     return map[mode] || mode || '—';
-  }
-
-  /** Persist every terminal run (win/loss) of either model into the
-   *  all-time records store. Deduplicated per attempt via outcome tokens. */
-  captureRunOutcomes() {
-    if (!this.recordsStore) return;
-    const capture = (sim, model) => {
-      if (!sim?.metrics) return;
-      const m = sim.metrics;
-      const outcome = m.runOutcome;
-      if (outcome !== 'win' && outcome !== 'loss') return;
-      const token = `${outcome}|${m.completionTime}|${(m.distanceTraveled || 0).toFixed(3)}|`+
-        `${(m.avgVelocity || 0).toFixed(4)}|${this.routeLearner?.runCount || 0}`;
-      if (this.recordedTokens.get(sim) === token) return;
-      this.recordedTokens.set(sim, token);
-      const isAdaptive = model === 'B';
-      const controllerMode = isAdaptive
-        ? (this.cfg.controllerMode || 'natural_support_face') : 'fixed_baseline';
-      const { newBest, newWorst } = recordRun(this.recordsStore, {
-        expId: this.cfg.experimentId,
-        terrainLevel: this.cfg.terrainLevel,
-        model,
-        modelLabel: isAdaptive ? 'Model B' : 'Model A',
-        controllerMode,
-        controllerShort: this.constructor.controllerShortLabel(controllerMode),
-        outcome,
-        completionTime: m.completionTime,
-        distanceTraveled: m.distanceTraveled || 0,
-        avgVelocity: m.avgVelocity || 0,
-        maxCableTension: Number.isFinite(m.maxCableTension) ? m.maxCableTension : null,
-        payloadAccelMax: Number.isFinite(m.payloadAccelMax) ? m.payloadAccelMax : null,
-        shapeDeformationMax: Number.isFinite(m.shapeDeformationMax) ? m.shapeDeformationMax : null,
-        energyCost: Number.isFinite(m.energyCost) ? m.energyCost : null
-      });
-      saveRecords(window.localStorage, this.recordsStore);
-      this.updateRecordsSummary();
-      if (newBest || newWorst) this.updateMetricsTable();
-    };
-    capture(this.simA, 'A');
-    capture(this.simB, 'B');
-  }
-
-  updateRecordsSummary() {
-    const element = document.getElementById('records-total');
-    if (!element) return;
-    const total = this.recordsStore?.entries.length || 0;
-    element.textContent = `${total} all-time run${total === 1 ? '' : 's'} recorded`;
   }
 
   // Single entry point for every gravity change (top-bar preset, sidebar
@@ -609,10 +599,9 @@ class App {
       presetSelect.value = match;
     }
 
-    // Reactive telemetry: metrics table immediately; the monitoring charts
-    // re-sample every animation frame in tick(), so they pick up the new
-    // gravity on their own.
-    this.updateMetricsTable();
+    // The monitoring charts re-sample every frame and pick up the new gravity
+    // on their own; the URL reflects the setup.
+    this.syncUrl();
   }
 
   updateHUD() {
@@ -694,8 +683,14 @@ class App {
       ? diagB.monitoring.gravity : Math.abs(this.cfg.gravity?.[2] ?? 9.81);
     setText('monitor-gravity',
       `g = ${gravityNow.toFixed(3)} m/s² · rover weight ≈ ${(diagB.monitoring?.weightForce ?? 0).toFixed(1)} N`);
-    this.updateLearningHUD();
-    this.updateABComparisonTable();
+    // Tables and learner text at 4 Hz: rebuilding them every frame costs
+    // layout time that the physics needs.
+    const now = performance.now();
+    if (now-(this.lastTablePaint || 0) > 250) {
+      this.lastTablePaint = now;
+      this.updateLearningHUD();
+      this.updateABComparisonTable();
+    }
   }
 
   updateMonitoringHUD(monitoring) {
@@ -739,25 +734,23 @@ class App {
         goalResult.textContent = bothModelsAtGoal
           ? `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · both models at goal · next training starts soon`
           : `WIN · goal reached in ${metrics.completionTime.toFixed(2)} s · waiting for Model A before next training`;
-        goalResult.className = 'mt-2 rounded bg-emerald-950/60 p-2 text-emerald-300 font-bold';
+        goalResult.className = 'note note-win';
       } else if (metrics.runOutcome === 'loss') {
         const remaining = Math.max(0, this.cfg.courseGoalY-(this.simB.currentDiag.centroid?.[1] || 0));
         const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
         goalResult.textContent = `LOSS · deadline (${deadline.toFixed(0)} s) exceeded · ${remaining.toFixed(2)} m remaining · auto training waits until both models reach their goals`;
-        goalResult.className = 'mt-2 rounded bg-rose-950/60 p-2 text-rose-300 font-bold';
+        goalResult.className = 'note note-bad';
       } else {
         const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
         goalResult.textContent = `Attempt ${this.routeLearner?.runCount+1 || 1} running · reach Goal B before ${deadline.toFixed(0)} s`;
-        goalResult.className = 'mt-2 rounded bg-slate-900 p-2 text-slate-400';
+        goalResult.className = 'note';
       }
     }
     const warningElement = document.getElementById('monitor-warnings');
     if (warningElement) {
       warningElement.textContent = monitoring.warnings.length
         ? `WARNING · ${monitoring.warnings.join(' · ')}` : 'No structural warnings';
-      warningElement.className = monitoring.warnings.length
-        ? 'mt-2 rounded bg-rose-950/60 p-2 text-rose-300 font-bold'
-        : 'mt-2 rounded bg-emerald-950/40 p-2 text-emerald-300';
+      warningElement.className = monitoring.warnings.length ? 'note note-bad' : 'note note-ok';
     }
 
     const cable = monitoring.cables[this.selectedCableIndex] || monitoring.cables[0];
@@ -769,9 +762,8 @@ class App {
       setText('cable-inspector-force', `${cable.force.toFixed(2)} N`);
       setText('cable-inspector-state', cable.state.toUpperCase());
       const stateElement = document.getElementById('cable-inspector-state');
-      if (stateElement) stateElement.className = cable.state === 'overload' ? 'text-rose-400 font-bold'
-        : cable.state === 'slack' ? 'text-fuchsia-400' : cable.state === 'moderate' || cable.state === 'high'
-          ? 'text-amber-300' : 'text-emerald-300';
+      if (stateElement) stateElement.className = cable.state === 'overload' ? 'c-bad'
+        : cable.state === 'slack' ? 'c-slack' : cable.state === 'moderate' || cable.state === 'high' ? 'c-warn' : 'c-ok';
     }
     const contactList = document.getElementById('monitor-contact-list');
     if (contactList) {
@@ -780,7 +772,7 @@ class App {
         const friction = Math.hypot(...(contact.frictionForce || [0, 0, 0]));
         const event = activeEvents?.get(`${contact.kind || 'node'}:${contact.id}`);
         const duration = event ? ` · ${(monitoring.time-event.startTime).toFixed(2)} s` : '';
-        return `<div class="flex justify-between gap-2"><span class="text-orange-300">${contact.id} · ${contact.objectId}${duration}</span><span>${contact.normalForce.toFixed(1)} N normal · ${friction.toFixed(1)} N friction</span></div>`;
+        return `<div class="kv"><span>${contact.id} · ${contact.objectId}${duration}</span><span>${contact.normalForce.toFixed(1)} N · ${friction.toFixed(1)} N fr</span></div>`;
       }).join('') : 'No active contacts';
     }
   }
@@ -813,61 +805,70 @@ class App {
   updateABComparisonTable() {
     const body = document.getElementById('ab-comparison-body');
     if (!body) return;
-    const renderModel = (label, metrics, color) => {
+    const renderModel = (label, metrics, rowClass) => {
       const obstacles = metrics.obstacleSummary || { over: 0, around: 0, retries: 0, bypassViolations: 0 };
-      const completion = metrics.runOutcome === 'loss' ? 'LOSS · 120 s'
+      const deadline = this.cfg.missionDeadlineSeconds || this.cfg.T_end;
+      const completion = metrics.runOutcome === 'loss' ? `LOSS · ${deadline.toFixed(0)} s`
         : metrics.completionTime === null ? 'running' : `WIN · ${metrics.completionTime.toFixed(1)} s`;
-      return `<tr class="border-b border-slate-800">
-        <td class="py-2.5 px-3 font-bold ${color}">${label}</td>
-        <td class="py-2.5 px-3">${metrics.measuredDistance.toFixed(2)} m</td>
-        <td class="py-2.5 px-3">${completion}</td>
-        <td class="py-2.5 px-3">${metrics.avgVelocity.toFixed(3)} m/s</td>
-        <td class="py-2.5 px-3">${metrics.speedVariance.toFixed(5)}</td>
-        <td class="py-2.5 px-3">${metrics.lateralTravel.toFixed(2)} m</td>
-        <td class="py-2.5 px-3 text-emerald-400">${obstacles.over}</td>
-        <td class="py-2.5 px-3 text-amber-400">${obstacles.around}</td>
-        <td class="py-2.5 px-3">${obstacles.retries}</td>
-        <td class="py-2.5 px-3 ${obstacles.bypassViolations ? 'text-rose-400 font-bold' : 'text-emerald-400'}">${obstacles.bypassViolations || 0}</td>
-        <td class="py-2.5 px-3">${metrics.energyCost.toFixed(2)} J</td>
-        <td class="py-2.5 px-3">${metrics.payloadAccelMax.toFixed(2)} G</td>
+      const f = (value, digits, unit = '') => (Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—');
+      return `<tr class="${rowClass}">
+        <td>${label}</td>
+        <td>${f(metrics.measuredDistance, 2, ' m')}</td>
+        <td>${completion}</td>
+        <td>${f(metrics.avgVelocity, 3, ' m/s')}</td>
+        <td>${f(metrics.speedVariance, 5)}</td>
+        <td>${f(metrics.lateralTravel, 2, ' m')}</td>
+        <td>${obstacles.over}</td>
+        <td>${obstacles.around}</td>
+        <td>${obstacles.retries}</td>
+        <td class="${obstacles.bypassViolations ? 'c-bad' : ''}">${obstacles.bypassViolations || 0}</td>
+        <td>${f(metrics.energyCost, 2, ' J')}</td>
+        <td>${f(metrics.payloadAccelMax, 2, ' g')}</td>
       </tr>`;
     };
-    body.innerHTML = renderModel('Model A · baseline', this.simA.metrics, 'text-slate-300')+
-      renderModel('Model B · adaptive OVER', this.simB.metrics, 'text-cyan-300');
+    body.innerHTML = renderModel('Model A · baseline', this.simA.metrics, 'row-a')+
+      renderModel('Model B · adaptive', this.simB.metrics, 'row-b');
   }
 
   updateCharts() {
     if (this.simB.stepCount - (this.lastChartStep || 0) >= this.chartUpdateIntervalSteps) {
       this.lastChartStep = this.simB.stepCount;
       const hist = this.simB.history;
-      // Show a calm 20-second window instead of redrawing the full, noisy
-      // physics history. History samples arrive every 20 ms.
-      const start = Math.max(0, hist.t.length-1000);
-      const labels = hist.t.slice(start).map(t => t.toFixed(1));
-      // Slice to the visible window BEFORE smoothing: averaging the full
-      // multi-hundred-thousand-sample expedition history on every redraw is
-      // wasted work when only the last 20 s is displayed.
-      const windowOf = series => series.slice(start);
-      this.chartG.data.labels = labels;
-      this.chartG.data.datasets[0].data = movingAverage(windowOf(hist.centroidAccel), 50);
-      this.chartG.update('none');
+      // 20-second window (history samples arrive every 40 ms of sim time).
+      const start = Math.max(0, hist.t.length-500);
+      const t = hist.t.slice(start);
+      const win = series => series.slice(start);
+      const set = (chart, index, data) => { if (chart) chart.data.datasets[index].data = data; };
 
-      this.chartV.data.labels = labels;
-      this.chartV.data.datasets[0].data = movingAverage(windowOf(hist.planarSpeed), 50);
-      this.chartV.data.datasets[1].data = movingAverage(windowOf(hist.deformation), 50);
-      this.chartV.update('none');
+      set(this.chartG, 0, xy(t, movingAverage(win(hist.centroidAccel), 25)));
+      this.chartG?.update('none');
+      set(this.chartV, 0, xy(t, movingAverage(win(hist.planarSpeed), 25)));
+      set(this.chartV, 1, xy(t, movingAverage(win(hist.deformation), 25)));
+      this.chartV?.update('none');
 
-      this.chartControl.data.labels = labels;
-      this.chartControl.data.datasets[0].data = movingAverage(windowOf(hist.controlCost), 50);
-      this.chartControl.data.datasets[1].data =
-        movingAverage(windowOf(hist.constraintError), 50).map(error => error*1000);
-      this.chartControl.data.datasets[2].data =
-        movingAverage(windowOf(hist.relaxationFraction), 50).map(fraction => fraction*100);
-      this.chartControl.update('none');
+      const histA = this.simA.history;
+      const startA = Math.max(0, histA.t.length-500);
+      const positive = value => Math.max(Math.abs(value), 1e-16);
+      set(this.chartControl, 0, xy(histA.t.slice(startA), histA.constraintError.slice(startA), positive));
+      set(this.chartControl, 1, xy(t, win(hist.constraintError), positive));
+      this.chartControl?.update('none');
+
+      if (this.chartLedger && hist.cableWork) {
+        set(this.chartLedger, 0, xy(t, win(hist.cableWork)));
+        set(this.chartLedger, 1, xy(t, win(hist.contactWork)));
+        set(this.chartLedger, 2, xy(t, win(hist.dragWork || [])));
+        set(this.chartLedger, 3, xy(t, win(hist.assistWork)));
+        set(this.chartLedger, 4, xy(t, win(hist.constraintWork)));
+        this.chartLedger.update('none');
+      }
+      if (this.chartResidual && hist.energyResidual) {
+        set(this.chartResidual, 0, xy(histA.t.slice(startA), (histA.energyResidual || []).slice(startA), positive));
+        set(this.chartResidual, 1, xy(t, win(hist.energyResidual), positive));
+        this.chartResidual.update('none');
+      }
 
       this.updateMonitoringCharts();
-
-      this.updateMetricsTable();
+      this.updatePhysicsAudit();
     }
   }
 
@@ -877,46 +878,42 @@ class App {
     const history = monitor.history;
     const windowSamples = Math.ceil(monitor.settings.chartWindowSeconds/monitor.settings.chartSamplePeriod);
     const start = Math.max(0, history.t.length-windowSamples);
-    const labels = history.t.slice(start).map(time => time.toFixed(2));
-    const thresholdLine = value => new Array(labels.length).fill(value);
+    const t = history.t.slice(start);
+    const constant = value => (t.length ? [{ x: t[0], y: value }, { x: t[t.length-1], y: value }] : []);
     const cableDelta = history.cableDelta.slice(start).map(values => values[this.selectedCableIndex] || 0);
     const cableForce = history.cableForce.slice(start).map(values => values[this.selectedCableIndex] || 0);
     const cableAverage = history.cableForce.slice(start).map(values =>
       values.reduce((sum, value) => sum+value, 0)/Math.max(1, values.length));
+    const set = (chart, index, data) => { if (chart) chart.data.datasets[index].data = data; };
 
-    this.chartGoalError.data.labels = labels;
-    this.chartGoalError.data.datasets[0].data = movingAverage(history.goalError.slice(start), 3);
-    this.chartGoalError.data.datasets[1].data = thresholdLine(monitor.settings.goalThreshold);
-    this.chartGoalError.update('none');
+    set(this.chartGoalError, 0, xy(t, movingAverage(history.goalError.slice(start), 3)));
+    set(this.chartGoalError, 1, constant(monitor.settings.goalThreshold));
+    this.chartGoalError?.update('none');
 
-    this.chartFormationError.data.labels = labels;
-    this.chartFormationError.data.datasets[0].data = movingAverage(history.formationError.slice(start), 3);
-    this.chartFormationError.data.datasets[1].data = thresholdLine(monitor.settings.formationWarningThreshold);
-    this.chartFormationError.update('none');
+    set(this.chartFormationError, 0, xy(t, movingAverage(history.formationError.slice(start), 3)));
+    set(this.chartFormationError, 1, constant(monitor.settings.formationWarningThreshold));
+    this.chartFormationError?.update('none');
 
-    this.chartCableDelta.data.labels = labels;
-    this.chartCableDelta.data.datasets[0].data = movingAverage(cableDelta, 3);
-    this.chartCableDelta.data.datasets[1].data = thresholdLine(0);
-    this.chartCableDelta.update('none');
+    set(this.chartCableDelta, 0, xy(t, movingAverage(cableDelta, 3)));
+    set(this.chartCableDelta, 1, constant(0));
+    this.chartCableDelta?.update('none');
 
-    this.chartCableForce.data.labels = labels;
-    this.chartCableForce.data.datasets[0].data = movingAverage(cableForce, 3);
-    this.chartCableForce.data.datasets[1].data = movingAverage(cableAverage, 3);
-    this.chartCableForce.data.datasets[2].data = thresholdLine(monitor.settings.cableOverloadForce);
-    this.chartCableForce.update('none');
+    set(this.chartCableForce, 0, xy(t, movingAverage(cableForce, 3)));
+    set(this.chartCableForce, 1, xy(t, movingAverage(cableAverage, 3)));
+    set(this.chartCableForce, 2, constant(monitor.settings.cableOverloadForce));
+    this.chartCableForce?.update('none');
 
-    this.chartContactCount.data.labels = labels;
-    this.chartContactCount.data.datasets[0].data = history.contactCount.slice(start);
-    this.chartContactCount.update('none');
+    set(this.chartContactCount, 0, xy(t, history.contactCount.slice(start)));
+    this.chartContactCount?.update('none');
 
     const pathStart = Math.max(0, history.t.length-2500);
-    this.chartComPath.data.datasets[0].data = history.comX.slice(pathStart).map((x, index) => ({
-      x, y: history.comY[pathStart+index]
-    }));
-    this.chartComPath.data.datasets[1].data = [{ x: monitor.start[0], y: monitor.start[1] }];
-    this.chartComPath.data.datasets[2].data = [{ x: monitor.goal[0], y: monitor.goal[1] }];
-    this.chartComPath.data.datasets[3].data = (this.terrain.course?.obstacles || []).map(obstacle => ({ x: obstacle.x, y: obstacle.y }));
-    this.chartComPath.update('none');
+    set(this.chartComPath, 0, history.comX.slice(pathStart).map((x, index) => ({ x, y: history.comY[pathStart+index] })));
+    set(this.chartComPath, 1, [{ x: monitor.start[0], y: monitor.start[1] }]);
+    set(this.chartComPath, 2, [{ x: monitor.goal[0], y: monitor.goal[1] }]);
+    const obstacles = this.terrain.course?.obstacles
+      || (this.terrain.rocks || []).filter(rock => rock.kind === 'challenge');
+    set(this.chartComPath, 3, obstacles.map(obstacle => ({ x: obstacle.x, y: obstacle.y })));
+    this.chartComPath?.update('none');
 
     const cableId = `C${String(this.selectedCableIndex+1).padStart(2, '0')}`;
     const deltaLabel = document.getElementById('chart-cable-delta-label');
@@ -924,137 +921,78 @@ class App {
     const forceLabel = document.getElementById('chart-cable-force-label');
     if (forceLabel) forceLabel.textContent = `${cableId} · tension [N]`;
 
-    // Instantaneous force distribution across every cable (raw values).
+    // Instantaneous force distribution (MATLAB colours by cable state).
     const stateColors = {
-      slack: '#a855f7', overload: '#ef4444', high: '#f97316',
-      moderate: '#facc15', nominal: '#22c55e'
+      slack: '#7E2F8E', overload: '#A2142F', high: '#D95319',
+      moderate: '#EDB120', nominal: '#0072BD'
     };
     const liveCables = monitor.latest?.cables || [];
-    if (liveCables.length) {
+    if (liveCables.length && this.chartCableBars) {
       this.chartCableBars.data.labels = liveCables.map(cable => cable.id);
       this.chartCableBars.data.datasets[0].data = liveCables.map(cable => cable.force);
       this.chartCableBars.data.datasets[0].backgroundColor =
-        liveCables.map(cable => stateColors[cable.state] || '#22c55e');
+        liveCables.map(cable => stateColors[cable.state] || '#0072BD');
       this.chartCableBars.data.datasets[1].data =
         new Array(liveCables.length).fill(monitor.settings.cableOverloadForce);
       this.chartCableBars.update('none');
     }
   }
 
-  updateMetricsTable() {
-    const tableBody = document.getElementById('experiments-table-body');
-    if (!tableBody) return;
-
-    let html = '';
-    const bData = this.benchmarkData || [];
-
-    for (let i = 1; i <= EXPERIMENT_NAMES.length; i++) {
-      const isCurrent = (i === this.cfg.experimentId);
-      const bRes = bData[i - 1] || {};
-      // Persisted snapshot keeps the row populated after any refresh, even
-      // when this session never ran the experiment and no benchmark exists.
-      const saved = getExperimentSnapshot(this.recordsStore, i);
-
-      const pick = (live, benchmark, snapshotField) => isCurrent
-        ? live
-        : (Number.isFinite(benchmark) ? benchmark
-          : (saved && Number.isFinite(saved[snapshotField]) ? saved[snapshotField] : NaN));
-      const distance = pick(this.simB.metrics.distanceTraveled, bRes.distance, 'distance');
-      const time = pick(this.simB.metrics.timeElapsed, bRes.time, 'elapsed');
-      const avgSpeed = pick(this.simB.metrics.avgVelocity, bRes.avgVelocity, 'avgVelocity');
-      const maxG = pick(this.simB.metrics.payloadAccelMax, bRes.maxG, 'maxG');
-      const maxTension = pick(this.simB.metrics.maxCableTension, bRes.maxTension, 'maxTension');
-      const deformation = pick(this.simB.metrics.shapeDeformationMax, bRes.deformation, 'deformation');
-      const obstacles = isCurrent && this.terrain.course
-        ? this.terrain.course.obstacles.length
-        : (Number.isFinite(bRes.obstacles) ? bRes.obstacles
-          : (saved && Number.isFinite(saved.obstacles) ? saved.obstacles : NaN));
-      const number = (value, digits, unit = '') => Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—';
-
-      const rowClass = isCurrent ? "bg-cyan-950/40 border-b border-cyan-800/80 font-bold" : "border-b border-slate-800 hover:bg-slate-800/40 transition";
-      let badge;
-      if (isCurrent) {
-        badge = '<span class="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 text-[10px]">ACTIVE LIVE</span>';
-      } else if (bRes.status) {
-        badge = `<span class="text-slate-500 text-[10px]">${bRes.status}</span>`;
-      } else if (saved) {
-        badge = `<span class="px-2 py-0.5 rounded bg-cyan-900/50 text-cyan-300 border border-cyan-800 text-[10px]">${formatSnapshotStatus(saved)}</span>`;
-      } else {
-        badge = '<span class="text-slate-500 text-[10px]">NOT RUN</span>';
-      }
-
-      const summary = summarizeForExperiment(this.recordsStore, i);
-      const recordTooltip = run => run
-        ? `${run.outcome.toUpperCase()} · t=${Number.isFinite(run.completionTime) ? `${run.completionTime.toFixed(2)}s` : '—'} · ${run.modelLabel} · ${run.controllerShort} · terrain L${run.terrainLevel} · ${new Date(run.timestamp).toLocaleString()}`
-        : '';
-      const snapshotTooltip = saved
-        ? `SAVED · ${saved.captures} captures · last ${saved.outcome?.toUpperCase() || 'RUN'} · `+
-          `peaks: ${saved.maxG?.toFixed?.(1) ?? '—'} G · ${saved.maxTension?.toFixed?.(1) ?? '—'} N · `+
-          `${saved.deformation?.toFixed?.(3) ?? '—'} m · best speed ${saved.bestAvgVelocity?.toFixed?.(2) ?? '—'} m/s · `+
-          `g=${Number.isFinite(saved.gravity) ? saved.gravity.toFixed(3) : '—'} m/s² · `+
-          `updated ${new Date(saved.updatedAt).toLocaleString()}`
-        : '';
-      const bestCell = `<td class="py-2.5 px-3 text-emerald-300 text-[10px]" title="${recordTooltip(summary.best)}">${formatRecordCell(summary.best)}</td>`;
-      const worstCell = `<td class="py-2.5 px-3 text-rose-300/90 text-[10px]" title="${recordTooltip(summary.worst)}">${formatRecordCell(summary.worst)}</td>`;
-      const rowTooltip = saved ? ` title="${snapshotTooltip}"` : '';
-
-      html += `<tr${rowTooltip} class="${rowClass}">
-        <td class="py-2.5 px-3 font-semibold text-cyan-300">${EXPERIMENT_NAMES[i - 1]}</td>
-        <td class="py-2.5 px-3 text-slate-200">${number(distance, 2, ' m')}</td>
-        <td class="py-2.5 px-3 text-slate-300">${number(time, 1, ' s')}</td>
-        <td class="py-2.5 px-3 text-emerald-400 font-bold">${number(avgSpeed, 2, ' m/s')}</td>
-        <td class="py-2.5 px-3 text-amber-400">${number(maxG, 1, ' G')}</td>
-        <td class="py-2.5 px-3 text-rose-400">${number(maxTension, 1, ' N')}</td>
-        <td class="py-2.5 px-3 text-slate-300">${number(deformation, 3, ' m')}</td>
-        <td class="py-2.5 px-3 text-cyan-400">${Number.isFinite(obstacles) ? obstacles : '—'}</td>
-        <td class="py-2.5 px-3">${badge}</td>
-        ${bestCell}
-        ${worstCell}
-      </tr>`;
-    }
-
-    tableBody.innerHTML = html;
+  /** Physics-audit panel: work ledger, residual, constraint error, assist share. */
+  updatePhysicsAudit() {
+    const panel = document.getElementById('physics-audit-body');
+    if (!panel) return;
+    const fmt = (value, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : '—';
+    const sci = value => Number.isFinite(value) ? value.toExponential(2) : '—';
+    const row = (label, a, b, cls = '') =>
+      `<tr><td class="audit-label">${label}</td><td class="${cls}">${a}</td><td class="${cls}">${b}</td></tr>`;
+    const diag = sim => sim.currentDiag?.energyLedger;
+    const A = diag(this.simA), B = diag(this.simB);
+    if (!A || !B) return;
+    const work = (ledger, key) => fmt(ledger.work[key], 2);
+    const share = ledger => `${(100*ledger.assistShare).toFixed(1)} %`;
+    panel.innerHTML = [
+      row('Physics core', this.simA.currentDiag.physicsCore === 'dae' ? 'Lagrangian DAE' : 'Legacy SHAKE',
+        this.simB.currentDiag.physicsCore === 'dae' ? 'Lagrangian DAE' : 'Legacy SHAKE'),
+      row('Actuation', this.cfg.pureCableActuation ? 'cable only' : 'with assists',
+        this.cfg.pureCableActuation ? 'cable only' : 'with assists'),
+      row('E(t) [J]', fmt(A.E), fmt(B.E)),
+      row('|ε| = |E − E₀ − ΣW| [J]', sci(Math.abs(A.residual)), sci(Math.abs(B.residual)), 'mono'),
+      row('max |ε| [J]', sci(A.maxAbsResidual), sci(B.maxAbsResidual), 'mono'),
+      // Before the corrector: what the integrator could not explain this step.
+      row('max per-step drift [J]', sci(A.maxStepDrift), sci(B.maxStepDrift), 'mono'),
+      row('Σ|drift| (corrected) [J]', fmt(A.driftAbs, 3), fmt(B.driftAbs, 3)),
+      row('max bar error [m]', sci(this.simA.metrics.maxConstraintError), sci(this.simB.metrics.maxConstraintError), 'mono'),
+      row('W cables [J]', work(A, 'cables'), work(B, 'cables')),
+      row('W contact [J]', work(A, 'contact'), work(B, 'contact')),
+      row('W drag [J]', work(A, 'drag'), work(B, 'drag')),
+      row('W assists [J]', fmt(A.work.assist+A.work.virtual, 2), fmt(B.work.assist+B.work.virtual, 2)),
+      row('W constraint proj. [J]', fmt(A.work.constraint+A.work.rodPenalty, 2), fmt(B.work.constraint+B.work.rodPenalty, 2)),
+      row('Algorithm-1 ΔW [J]', sci(A.work.corrector), sci(B.work.corrector), 'mono'),
+      row('Actuator energy [J]', fmt(this.simA.metrics.energyCost, 1), fmt(this.simB.metrics.energyCost, 1)),
+      row('Assist share of input', share(A), share(B), 'strong')
+    ].join('');
   }
 
-  loadExperiment(expId) {
-    // Preserve the outgoing experiment's latest live data before the sims
-    // are rebuilt — switching terrains never loses the previous run.
-    this.captureLiveSnapshots();
-    this.cfg.experimentId = expId;
-    // Levels 1–9 and 11–14 map directly; level 10 uses the A-vs-B course.
-    this.cfg.terrainLevel = (expId === 10) ? 7 : Math.min(14, expId);
-    this.cfg.groundRMS = MARS_ROUGHNESS_BY_LEVEL[expId] || 0.04;
-    this.cfg.abCourseEnabled = expId === 10;
-    this.cfg.targetGoalY = expId === 10 ? 60 : (expId === 14 ? 450 : 25);
-    this.cfg.targetDestination = [0, this.cfg.targetGoalY];
-    if (expId === 10) this.cfg.applyLevel10PerformanceProfile();
-    else {
-      this.cfg.applyStandardPerformanceProfile();
-      if (expId === 14) {
-        this.cfg.T_end = 5000.0; // 900 m of open-world terrain takes time
-        // The expedition crosses the full 1 km² open-world field: the start
-        // line sits at y = -450 m and the goal gate at y = +450 m, both well
-        // inside the rendered [-500, +500]² expanse. The scoring window must
-        // span the whole crossing or the run would "win" at a Level-10 line.
-        this.cfg.courseStartY = -450.0;
-        this.cfg.courseGoalY = 450.0;
-        this.cfg.courseMaxY = 480.0;
-        this.cfg.missionDeadlineSeconds = 5000.0;
-      }
-    }
+  updateMetricsTable() {
+    this.matrix?.render();
+  }
 
-    if (expId === 2) this.cfg.actuationMode = 'roll_backward';
-    else this.cfg.actuationMode = 'roll_forward';
+  /**
+   * Load a terrain level into physics, 3D view, inspector, matrix and URL.
+   * The open run is committed first, so switching levels never loses data.
+   */
+  loadExperiment(expId, { reason = 'level-switch' } = {}) {
+    this.recorder?.commit(reason);
+    configureLevel(this.cfg, expId);
     const gaitSelect = document.getElementById('select-gait-mode');
     if (gaitSelect) gaitSelect.value = this.cfg.actuationMode;
-
-    document.getElementById('txt-active-experiment-title').textContent = EXPERIMENT_NAMES[expId - 1];
     const experimentSelect = document.getElementById('select-experiment');
     if (experimentSelect) experimentSelect.value = String(expId);
     const speedSlider = document.getElementById('slider-target-speed');
     if (speedSlider) speedSlider.value = String(this.cfg.targetSpeed);
     const speedValue = document.getElementById('val-target-speed');
-    if (speedValue) speedValue.textContent = `${this.cfg.targetSpeed.toFixed(2)} m/s rolling target`;
+    if (speedValue) speedValue.textContent = `${this.cfg.targetSpeed.toFixed(2)} m/s`;
     const roughnessSlider = document.getElementById('slider-roughness');
     if (roughnessSlider) roughnessSlider.value = String(this.cfg.groundRMS);
     const roughnessValue = document.getElementById('val-roughness');
@@ -1083,13 +1021,7 @@ class App {
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
     this.simA = new Simulation(this.cfg, this.rover, this.terrain, 'fixed');
-    this.simB = new Simulation(
-      this.cfg,
-      this.rover,
-      this.terrain,
-      'adaptive',
-      this.routeLearner
-    );
+    this.simB = new Simulation(this.cfg, this.rover, this.terrain, 'adaptive', this.routeLearner);
     this.accumulatedTime = 0;
     this.lastChartStep = 0;
 
@@ -1102,94 +1034,324 @@ class App {
     this.vis.createTrajectoryTrail();
     this.vis.createGeometryCheckpointOverlay();
     this.updateForceLawChart();
+    syncNumericInputs();
+    this.updateViewportHeader();
+    this.matrix?.render();
+    this.syncUrl();
+  }
+
+  showNotice(message, kind = 'warn') {
+    showGlobalNotice(message, kind);
+  }
+
+  /** Read, validate and apply the Experiment tab, then reset both rovers. */
+  applyExperimentPanel() {
+    const read = id => document.getElementById(id)?.value;
+    const raw = {
+      seed: read('input-seed'), noiseModel: read('select-noise-model'), noiseSigma: read('input-noise-sigma'),
+      actuatorDelay: read('input-delay'), plantStiffnessScale: read('input-stiffness-scale'),
+      plantFrictionScale: read('input-friction-scale'), plantPayloadMassScale: read('input-payload-scale'),
+      sgtStroke: read('input-sgt-stroke'), sgtCoreStroke: read('input-sgt-core'),
+      sgtSpoolSpeed: read('input-sgt-rate'), sgtActiveCables: read('input-sgt-cables')
+    };
+    const { values, issues } = validateObject(EXPERIMENT_SCHEMA, raw);
+    const field = { seed: 'input-seed', noiseSigma: 'input-noise-sigma', actuatorDelay: 'input-delay',
+      plantStiffnessScale: 'input-stiffness-scale', plantFrictionScale: 'input-friction-scale',
+      plantPayloadMassScale: 'input-payload-scale', sgtStroke: 'input-sgt-stroke', sgtCoreStroke: 'input-sgt-core',
+      sgtSpoolSpeed: 'input-sgt-rate', sgtActiveCables: 'input-sgt-cables' };
+    for (const [key, id] of Object.entries(field)) {
+      const element = document.getElementById(id);
+      if (!element) continue;
+      const corrected = issues.some(issue => issue.startsWith(`${key}:`));
+      element.classList.toggle('is-invalid', corrected);
+      element.value = String(values[key]);
+    }
+    const status = document.getElementById('experiment-validation');
+    if (status) status.textContent = issues.length ? issues.join(' · ') : 'All inputs valid.';
+
+    const cfg = this.cfg;
+    if (document.getElementById('chk-seed-lock')?.checked) cfg.seed = values.seed;
+    else cfg.seed = Math.floor(Math.random()*1e6);
+    // Reset stress hooks, then apply the scenario preset and the manual fields.
+    Object.assign(cfg, { sensorNoise: { model: 'none' }, actuatorDelay: 0, disturbance: null,
+      plantStiffnessScale: 1, plantFrictionScale: 1, plantPayloadMassScale: 1 });
+    const scenario = read('select-scenario') || 'nominal';
+    SCENARIOS[scenario]?.apply(cfg);
+    if (values.noiseModel !== 'none') {
+      cfg.sensorNoise = { model: values.noiseModel, sigmaQ: values.noiseSigma, sigmaV: 4*values.noiseSigma,
+        outlierRate: 0.02, outlierScale: 10 };
+    }
+    if (values.actuatorDelay > 0) cfg.actuatorDelay = values.actuatorDelay;
+    if (values.plantStiffnessScale !== 1) cfg.plantStiffnessScale = values.plantStiffnessScale;
+    if (values.plantFrictionScale !== 1) cfg.plantFrictionScale = values.plantFrictionScale;
+    if (values.plantPayloadMassScale !== 1) cfg.plantPayloadMassScale = values.plantPayloadMassScale;
+    if (cfg.controllerMode === 'sgt_tipping') {
+      cfg.actuationDeltaL = values.sgtStroke;
+      cfg.coreActuationDeltaL = values.sgtCoreStroke;
+      cfg.cableLinearVelocity = values.sgtSpoolSpeed;
+      cfg.coreCableLinearVelocity = values.sgtSpoolSpeed;
+      cfg.sgtOptions = { ...(cfg.sgtOptions || {}), activeCables: values.sgtActiveCables };
+    }
+    this.loadExperiment(cfg.experimentId, { reason: 'experiment-apply' });
+    if (cfg.controllerMode === 'sgt_tipping') {
+      cfg.actuationDeltaL = values.sgtStroke;
+      cfg.coreActuationDeltaL = values.sgtCoreStroke;
+      cfg.cableLinearVelocity = values.sgtSpoolSpeed;
+      cfg.coreCableLinearVelocity = values.sgtSpoolSpeed;
+    }
+    this.simA.reset(false);
+    this.simB.reset(false);
+    this.syncPhysicsControls();
+    this.showNotice(`Applied: ${SCENARIOS[scenario]?.label || scenario}, seed ${cfg.seed}`, 'warn');
+  }
+
+  syncPhysicsControls() {
+    const core = document.getElementById('select-physics-core');
+    if (core) core.value = this.cfg.physicsCore === 'dae' ? 'dae' : 'legacy';
+    const pure = document.getElementById('select-actuation-physics');
+    if (pure) pure.value = this.cfg.pureCableActuation ? 'pure' : 'assisted';
+    const controller = document.getElementById('select-controller');
+    if (controller && this.cfg.controllerMode) controller.value = this.cfg.controllerMode;
+    const stroke = document.getElementById('slider-actuation');
+    if (stroke) stroke.value = String(this.cfg.actuationDeltaL);
+    const strokeValue = document.getElementById('val-actuation');
+    if (strokeValue) strokeValue.textContent = `${this.cfg.actuationDeltaL.toFixed(3)} m`;
+    const gait = document.getElementById('select-gait-mode');
+    if (gait) gait.value = this.cfg.actuationMode;
+    syncNumericInputs();
+    this.updateViewportHeader();
+    this.syncUrl();
   }
 
   bindEvents() {
-    // Mode Switcher: Geometry Checkpoint vs Locomotion Simulation
-    document.getElementById('btn-mode-toggle').addEventListener('click', () => {
-      this.isGeometryCheckpointMode = !this.isGeometryCheckpointMode;
-      const btnTxt = document.getElementById('txt-mode-toggle');
-      const banner = document.getElementById('geometry-checkpoint-banner');
+    const byId = id => document.getElementById(id);
+    const on = (id, type, handler) => byId(id)?.addEventListener(type, handler);
 
-      if (this.isGeometryCheckpointMode) {
-        btnTxt.textContent = "Mode: Geometry Checkpoint";
-        banner.classList.remove('hidden');
-        this.vis.toggleGeometryCheckpoint(true);
-        this.simA.reset();
-        this.simB.reset();
-      } else {
-        btnTxt.textContent = "Mode: Locomotion Simulation";
-        banner.classList.add('hidden');
-        this.vis.toggleGeometryCheckpoint(false);
+    // Geometry checkpoint vs locomotion
+    on('btn-mode-toggle', 'click', () => {
+      this.isGeometryCheckpointMode = !this.isGeometryCheckpointMode;
+      byId('txt-mode-toggle').textContent = this.isGeometryCheckpointMode ? 'Mode: Geometry' : 'Mode: Locomotion';
+      byId('geometry-checkpoint-banner')?.classList.toggle('hidden', !this.isGeometryCheckpointMode);
+      this.vis.toggleGeometryCheckpoint(this.isGeometryCheckpointMode);
+      if (this.isGeometryCheckpointMode) this.resetRovers('mode-change');
+    });
+
+    // Gait: the trajectory continues, so the run stays open (checkpointed).
+    const gaitSelect = byId('select-gait-mode');
+    const setGait = mode => {
+      if (this.cfg.actuationMode === mode) return;
+      this.cfg.actuationMode = mode;
+      if (gaitSelect) gaitSelect.value = mode;
+      this.recorder.checkpoint('gait-change');
+      this.syncUrl();
+    };
+    gaitSelect?.addEventListener('change', event => setGait(event.target.value));
+
+    // Controller defines the experiment: commit the run and restart cleanly.
+    on('select-controller', 'change', event => {
+      this.recorder.commit('controller-change');
+      this.cfg.controllerMode = event.target.value;
+      this.simB.controlDiagnostics.mode = event.target.value;
+      this.resetRovers('controller-change');
+      this.syncUrl();
+    });
+
+    on('select-actuator-mode', 'change', event => { this.cfg.actuatorMode = event.target.value; });
+
+    // Keyboard: W/A/S/D gait, Space play/pause
+    window.addEventListener('keydown', event => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (['input', 'select', 'textarea'].includes(tag) || event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const map = { w: 'roll_forward', arrowup: 'roll_forward', s: 'roll_backward', arrowdown: 'roll_backward',
+        a: 'steer_left', arrowleft: 'steer_left', d: 'steer_right', arrowright: 'steer_right' };
+      if (key === ' ' && tag !== 'button') {
+        event.preventDefault();
+        this.setPlaying(!this.isPlaying);
+        return;
+      }
+      if (map[key] && !document.activeElement?.closest?.('[role="tablist"]')) {
+        event.preventDefault();
+        setGait(map[key]);
       }
     });
 
-    // Gait Mode Selector
-    const gaitSelect = document.getElementById('select-gait-mode');
-    if (gaitSelect) {
-      gaitSelect.addEventListener('change', (e) => {
-        this.cfg.actuationMode = e.target.value;
+    // Terrain level
+    on('select-experiment', 'change', event => {
+      if (this.autoBenchmark.running) { event.target.value = String(this.cfg.experimentId); return; }
+      this.loadExperiment(parseInt(event.target.value, 10));
+      this.syncPhysicsControls();
+    });
+
+    // Physics core / actuation admissibility (both rovers share one config)
+    on('select-physics-core', 'change', event => {
+      this.recorder.commit('physics-change');
+      this.cfg.physicsCore = event.target.value;
+      this.resetRovers('physics-change');
+      this.syncPhysicsControls();
+    });
+    on('select-actuation-physics', 'change', event => {
+      this.recorder.commit('physics-change');
+      this.cfg.pureCableActuation = event.target.value === 'pure';
+      this.resetRovers('physics-change');
+      this.syncPhysicsControls();
+    });
+    on('btn-research-preset', 'click', () => {
+      this.loadExperiment(1, { reason: 'preset' });
+      this.cfg.applyResearchProfile();
+      this.resetRovers('preset');
+      this.syncPhysicsControls();
+      this.showNotice('Research preset: Lagrangian DAE · passive contact · cable-only · SGT gait · Level 1', 'ok');
+    });
+
+    on('btn-step', 'click', () => {
+      this.setPlaying(false, { record: false });
+      const steps = Math.round(0.1/this.cfg.dt);
+      for (let k = 0; k < steps; k++) {
+        if (this.simA.t < this.cfg.T_end && !this.simA.metrics.runTerminal) this.simA.step();
+        if (this.simB.t < this.cfg.T_end && !this.simB.metrics.runTerminal) this.simB.step();
+      }
+      this.recorder.tick();
+      this.lastChartStep = 0;
+    });
+    on('btn-inject-impulse', 'click', () => {
+      this.simA.injectImpulse([0.5, 0, 0]);
+      this.simB.injectImpulse([0.5, 0, 0]);
+      this.showNotice('Lateral 0.5 m/s impulse injected (booked as disturbance work).', 'warn');
+    });
+    on('btn-apply-experiment', 'click', () => this.applyExperimentPanel());
+
+    const controlsToggle = byId('btn-controls-toggle');
+    const header = document.querySelector('.app-header');
+    if (controlsToggle && header) {
+      if (window.matchMedia('(max-width: 640px)').matches) {
+        header.classList.add('controls-collapsed');
+        controlsToggle.setAttribute('aria-expanded', 'false');
+      }
+      controlsToggle.addEventListener('click', () => {
+        const collapsed = header.classList.toggle('controls-collapsed');
+        controlsToggle.setAttribute('aria-expanded', String(!collapsed));
       });
     }
 
-    const controllerSelect = document.getElementById('select-controller');
-    controllerSelect?.addEventListener('change', (e) => {
-      this.cfg.controllerMode = e.target.value;
-      this.simB.controlDiagnostics.mode = e.target.value;
+    // Inspector tabs (arrow keys move between tabs)
+    const tabs = [...document.querySelectorAll('.sidebar-tab')];
+    const showTab = name => {
+      tabs.forEach(tab => {
+        const active = tab.dataset.tab === name;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+      document.querySelectorAll('[data-tab-panel]').forEach(panel => {
+        panel.hidden = panel.dataset.tabPanel !== name;
+      });
+      if (name === 'audit') this.updatePhysicsAudit();
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => showTab(tab.dataset.tab));
+      tab.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        const next = tabs[(index+(event.key === 'ArrowRight' ? 1 : tabs.length-1)) % tabs.length];
+        next.focus();
+        showTab(next.dataset.tab);
+      });
+    });
+    showTab('params');
+
+    // Figure category filter
+    document.addEventListener('click', event => {
+      const button = event.target.closest?.('.fig-filter-btn');
+      if (!button) return;
+      const group = button.dataset.figFilter;
+      document.querySelectorAll('.fig-filter-btn').forEach(other => other.classList.toggle('is-active', other === button));
+      document.querySelectorAll('#figure-grid .fig').forEach(figure => {
+        figure.hidden = group !== 'all' && figure.dataset.figGroup !== group;
+      });
+      this.resizeVisibleCharts();
     });
 
-    document.getElementById('select-actuator-mode')?.addEventListener('change', (e) => {
-      this.cfg.actuatorMode = e.target.value;
+    // Figure export: screen PNG (dark, as displayed) and CSV
+    document.addEventListener('click', event => {
+      const png = event.target.closest?.('[data-export-png]');
+      const csv = event.target.closest?.('[data-export-csv]');
+      const key = png?.dataset.exportPng || csv?.dataset.exportCsv;
+      const chart = key ? (this.chartRegistry?.[key] || this.benchmarkCharts?.[key]) : null;
+      if (!chart) return;
+      const stamp = `L${this.cfg.experimentId}_${this.cfg.physicsCore}_${this.cfg.pureCableActuation ? 'cableonly' : 'assisted'}`;
+      if (png) exportChartPNG(chart, `fig_${key}_${stamp}.png`, 4);
+      else exportChartCSV(chart, `fig_${key}_${stamp}.csv`);
+      event.target.closest('details')?.removeAttribute('open');
+    });
+    // Paper export: white background, IEEE sizes, MATLAB colours
+    document.addEventListener('click', async event => {
+      const item = event.target.closest?.('[data-ieee]');
+      if (!item) return;
+      const chart = this.chartRegistry?.[item.dataset.ieee] || this.benchmarkCharts?.[item.dataset.ieee];
+      item.closest('details')?.removeAttribute('open');
+      if (!chart) return;
+      try {
+        await exportChartIEEE(chart, item.dataset.format, item.dataset.width, `fig_${item.dataset.ieee}`);
+      } catch (error) {
+        this.showNotice(`Export failed: ${error.message}`, 'error');
+      }
+    });
+    // Close open export menus when clicking elsewhere
+    document.addEventListener('click', event => {
+      document.querySelectorAll('details.fig-menu[open]').forEach(menu => {
+        if (!menu.contains(event.target)) menu.removeAttribute('open');
+      });
     });
 
-    // Interactive Keyboard Driving Controls (W/A/S/D / Arrow keys)
-    window.addEventListener('keydown', (e) => {
-      if (['input', 'select', 'textarea'].includes(document.activeElement.tagName.toLowerCase())) return;
-
-      const k = e.key.toLowerCase();
-      let newMode = null;
-      if (k === 'w' || k === 'arrowup') newMode = 'roll_forward';
-      else if (k === 's' || k === 'arrowdown') newMode = 'roll_backward';
-      else if (k === 'a' || k === 'arrowleft') newMode = 'steer_left';
-      else if (k === 'd' || k === 'arrowright') newMode = 'steer_right';
-
-      if (newMode) {
-        e.preventDefault();
-        this.cfg.actuationMode = newMode;
-        if (gaitSelect) gaitSelect.value = newMode;
+    // Transport
+    on('btn-play-pause', 'click', () => this.setPlaying(!this.isPlaying));
+    on('btn-reset', 'click', () => {
+      this.resetRovers('reset');
+      this.setPlaying(true, { record: false });
+    });
+    on('select-speed', 'change', event => {
+      const requested = parseFloat(event.target.value);
+      this.simSpeed = ALLOWED_SPEEDS.includes(requested) ? requested : 1.0;
+      this.accumulatedTime = 0;
+      this.lastFrameTime = performance.now();
+      this.syncUrl();
+    });
+    on('select-camera', 'change', event => {
+      this.vis.setCameraMode(event.target.value);
+      this.syncUrl();
+    });
+    on('btn-toggle-forces', 'click', event => {
+      const onState = event.currentTarget.getAttribute('aria-pressed') !== 'true';
+      this.vis.toggleForceOverlay(onState);
+      event.currentTarget.setAttribute('aria-pressed', String(onState));
+      event.currentTarget.classList.toggle('is-on', onState);
+    });
+    on('btn-toggle-debug', 'click', event => {
+      this.showDebugLabels = !this.showDebugLabels;
+      this.vis.toggleDebugLabels(this.showDebugLabels);
+      event.currentTarget.setAttribute('aria-pressed', String(this.showDebugLabels));
+      event.currentTarget.classList.toggle('is-on', this.showDebugLabels);
+    });
+    on('btn-copy-link', 'click', async () => {
+      const url = this.syncUrl() || window.location.href;
+      try {
+        await navigator.clipboard.writeText(url);
+        this.showNotice('Link to this exact setup copied.', 'ok');
+      } catch {
+        this.showNotice(url, 'warn');
       }
     });
 
-    // Experiment Selector
-    document.getElementById('select-experiment').addEventListener('change', (e) => {
-      this.loadExperiment(parseInt(e.target.value));
-    });
-
-    // Play/Pause
-    document.getElementById('btn-play-pause').addEventListener('click', () => {
-      this.isPlaying = !this.isPlaying;
-      document.getElementById('btn-play-pause').textContent = this.isPlaying ? 'Pause' : 'Play';
-    });
-
-    // Reset
-    document.getElementById('btn-reset').addEventListener('click', () => {
-      this.simA.reset();
-      this.simB.reset();
-      this.accumulatedTime = 0;
-      this.learningRestartAt = null;
-      this.isPlaying = true;
-      document.getElementById('btn-play-pause').textContent = 'Pause';
-    });
-
-    document.getElementById('btn-toggle-auto-learning')?.addEventListener('click', () => {
+    // Route learner
+    on('btn-toggle-auto-learning', 'click', () => {
       this.autoLearningEnabled = !this.autoLearningEnabled;
       this.learningRestartAt = null;
       this.updateLearningHUD();
     });
-
-    document.getElementById('btn-clear-learning')?.addEventListener('click', () => {
+    on('btn-clear-learning', 'click', () => {
       this.routeLearner?.resetLearning();
       this.persistRouteLearning();
+      this.recorder.commit('reset');
       this.simA.reset(false);
       this.simB.reset(false);
       this.accumulatedTime = 0;
@@ -1197,198 +1359,279 @@ class App {
       this.updateLearningHUD();
     });
 
-    // Multi-rate realtime playback with an unchanged physics time step.
-    document.getElementById('select-speed').addEventListener('change', (e) => {
-      const requestedSpeed = parseFloat(e.target.value);
-      const allowedSpeeds = [0.25, 0.5, 1, 2, 4];
-      this.simSpeed = allowedSpeeds.includes(requestedSpeed) ? requestedSpeed : 1.0;
-      this.accumulatedTime = 0;
-      this.lastFrameTime = performance.now();
-    });
-
-    // Camera Mode
-    document.getElementById('select-camera').addEventListener('change', (e) => {
-      this.vis.setCameraMode(e.target.value);
-    });
-
-    // Toggle Force Overlay
-    let forceOverlayOn = true;
-    document.getElementById('btn-toggle-forces').addEventListener('click', () => {
-      forceOverlayOn = !forceOverlayOn;
-      this.vis.toggleForceOverlay(forceOverlayOn);
-      document.getElementById('btn-toggle-forces').textContent = `Force Overlay: ${forceOverlayOn ? 'ON' : 'OFF'}`;
-    });
-
-    document.getElementById('btn-toggle-debug')?.addEventListener('click', (event) => {
-      this.showDebugLabels = !this.showDebugLabels;
-      this.vis.toggleDebugLabels(this.showDebugLabels);
-      event.currentTarget.textContent = `IDs: ${this.showDebugLabels ? 'ON' : 'OFF'}`;
-      event.currentTarget.classList.toggle('text-cyan-300', this.showDebugLabels);
-    });
-
-    document.getElementById('select-monitor-cable')?.addEventListener('change', (event) => {
+    // Monitoring
+    on('select-monitor-cable', 'change', event => {
       this.selectedCableIndex = Number(event.target.value) || 0;
       this.vis.setSelectedCable(this.selectedCableIndex);
       this.updateMonitoringHUD(this.simB.currentDiag.monitoring);
       this.updateMonitoringCharts();
     });
-
-    document.getElementById('input-goal-threshold')?.addEventListener('input', (event) => {
+    on('input-goal-threshold', 'input', event => {
       const threshold = Number(event.target.value);
       this.cfg.monitoring.goalThreshold = threshold;
       if (this.simB.monitor) this.simB.monitor.settings.goalThreshold = threshold;
-      const value = document.getElementById('val-goal-threshold');
+      const value = byId('val-goal-threshold');
       if (value) value.textContent = `${threshold.toFixed(2)} m`;
     });
-
     document.querySelectorAll('[data-monitor-export]').forEach(button => {
       button.addEventListener('click', () => {
-        const kind = button.dataset.monitorExport;
         if (!this.simB.monitor) return;
-        downloadText(`${kind}.csv`, this.simB.monitor.exportCsv(kind));
+        downloadText(`${button.dataset.monitorExport}.csv`, this.simB.monitor.exportCsv(button.dataset.monitorExport));
       });
     });
-    document.getElementById('btn-export-monitor-json')?.addEventListener('click', () => {
+    on('btn-export-monitor-json', 'click', () => {
       if (!this.simB.monitor) return;
       downloadText('complete_simulation_log.json', this.simB.monitor.exportJson(), 'application/json;charset=utf-8');
     });
 
-    document.getElementById('btn-clear-records')?.addEventListener('click', () => {
-      if (!this.recordsStore) return;
-      clearRecords(this.recordsStore);
-      saveRecords(window.localStorage, this.recordsStore);
-      this.recordedTokens = new WeakMap();
-      this.updateRecordsSummary();
-      this.updateMetricsTable();
+    // ---------------------------------------------------------- benchmark records
+    const day = () => new Date().toISOString().slice(0, 10);
+    on('btn-export-json', 'click', () => downloadText(`tensegrity_benchmarks_${day()}.json`, this.persistence.exportJSON(), 'application/json;charset=utf-8'));
+    on('btn-export-csv', 'click', () => downloadText(`tensegrity_benchmarks_${day()}.csv`, this.persistence.exportCSV()));
+    on('input-import-json', 'change', async event => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (!file) return;
+      try {
+        const changed = this.persistence.importJSON(await file.text());
+        this.showNotice(`Imported ${file.name}: ${changed} run${changed === 1 ? '' : 's'} added or updated.`, 'ok');
+      } catch (error) {
+        this.showNotice(`Import failed: ${error.message}`, 'error');
+      }
+    });
+    const clearDialog = byId('dlg-clear');
+    on('btn-clear-records', 'click', () => {
+      const count = byId('dlg-clear-count');
+      if (count) count.textContent = String(this.persistence.state.runs.length);
+      if (clearDialog?.showModal) clearDialog.showModal();
+      else if (window.confirm('Delete all saved benchmark records?')) this.clearRecords();
+    });
+    clearDialog?.addEventListener('close', () => {
+      if (clearDialog.returnValue === 'confirm') this.clearRecords();
     });
 
-    // Gravity Slider Control
-    document.getElementById('slider-gravity').addEventListener('input', (e) => {
-      this.setGravity(parseFloat(e.target.value), { source: 'slider' });
+    // Run all 14 levels
+    const runAll = byId('btn-run-all');
+    runAll?.addEventListener('click', async () => {
+      if (this.autoBenchmark.running) return;
+      const duration = Number(byId('select-autobench-duration')?.value) || 20;
+      const strip = byId('autobench-status');
+      const bar = byId('autobench-bar');
+      const text = byId('autobench-text');
+      strip?.classList.remove('hidden');
+      runAll.disabled = true;
+      const started = performance.now();
+      const report = await this.autoBenchmark.run({
+        duration,
+        onProgress: ({ level, index, total, fraction, simTime }) => {
+          if (bar) bar.style.width = `${(100*fraction).toFixed(1)}%`;
+          const elapsed = (performance.now()-started)/1000;
+          const eta = fraction > 0.02 ? elapsed*(1-fraction)/fraction : NaN;
+          if (text) text.textContent = `Level ${level} (${index+1}/${total}) · t = ${simTime.toFixed(1)} / ${duration} s`+
+            `${Number.isFinite(eta) ? ` · about ${Math.ceil(eta/60)} min left` : ''}`;
+        }
+      });
+      runAll.disabled = false;
+      if (text) text.textContent = report?.stopped ? 'Stopped' : `Done in ${((performance.now()-started)/60000).toFixed(1)} min`;
+      if (report) this.showAutoBenchmarkReport(report);
+    });
+    on('btn-stop-run-all', 'click', () => this.autoBenchmark.stop());
+    on('btn-report-json', 'click', () => {
+      const report = this.autoBenchmark.report;
+      if (report) downloadText(`auto_benchmark_${day()}.json`, JSON.stringify(report, null, 2), 'application/json;charset=utf-8');
+    });
+    on('btn-report-csv', 'click', () => {
+      const report = this.autoBenchmark.report;
+      if (report) downloadText(`auto_benchmark_${day()}.csv`, AutoBenchmark.reportCSV(report));
     });
 
-    // Top-bar gravity quick-select: presets write straight into cfg.gravity,
-    // Custom just focuses the sidebar slider for fine tuning.
-    document.getElementById('select-gravity-preset').addEventListener('change', (e) => {
-      const preset = e.target.value;
+    // ---------------------------------------------------------- parameters
+    on('slider-gravity', 'input', event => this.setGravity(parseFloat(event.target.value), { source: 'slider' }));
+    on('select-gravity-preset', 'change', event => {
       const presets = { earth: 9.81, mars: 3.721, moon: 1.625 };
-      if (preset === 'custom') {
-        // Keep current value; the slider is already live-linked below.
-        document.getElementById('slider-gravity').focus();
+      if (event.target.value === 'custom') {
+        document.querySelector('.sidebar-tab[data-tab="params"]')?.click();
+        byId('slider-gravity')?.focus();
         return;
       }
-      this.setGravity(presets[preset], { source: 'preset' });
+      this.setGravity(presets[event.target.value], { source: 'preset' });
     });
 
-    // Parameter Sliders
-    document.getElementById('slider-pretension').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      this.cfg.pretensionS = val;
-      document.getElementById('val-pretension').textContent = `${val.toFixed(1)} N`;
-      this.loadExperiment(this.cfg.experimentId);
-      this.updateMetricsTable();
+    // Pretension / stiffness rebuild the rover: readout live while dragging,
+    // rebuild once on release (the open run is committed first).
+    on('slider-pretension', 'input', event => {
+      byId('val-pretension').textContent = `${parseFloat(event.target.value).toFixed(1)} N`;
     });
-
-    document.getElementById('slider-stiffness').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      this.cfg.kS = val;
-      document.getElementById('val-stiffness').textContent = `${val.toFixed(0)} N/m`;
-      this.loadExperiment(this.cfg.experimentId);
-      this.updateMetricsTable();
+    on('slider-pretension', 'change', event => {
+      this.cfg.pretensionS = parseFloat(event.target.value);
+      this.loadExperiment(this.cfg.experimentId, { reason: 'parameter-change' });
     });
-
-    document.getElementById('slider-restitution').addEventListener('input', (e) => {
-      const lockedRestitution = 0.02;
-      e.target.value = String(lockedRestitution);
-      this.cfg.restitution = lockedRestitution;
-      document.getElementById('val-restitution').textContent = '0.02 (non-bouncy lock)';
+    on('slider-stiffness', 'input', event => {
+      byId('val-stiffness').textContent = `${parseFloat(event.target.value).toFixed(0)} N/m`;
     });
-
-    document.getElementById('slider-actuation').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      this.cfg.actuationDeltaL = val;
-      document.getElementById('val-actuation').textContent = `${val.toFixed(3)} m`;
-      this.updateMetricsTable();
+    on('slider-stiffness', 'change', event => {
+      this.cfg.kS = parseFloat(event.target.value);
+      this.loadExperiment(this.cfg.experimentId, { reason: 'parameter-change' });
     });
-
-    document.getElementById('slider-roughness').addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      this.cfg.groundRMS = val;
-      document.getElementById('val-roughness').textContent = `${val.toFixed(2)} m`;
+    on('slider-restitution', 'input', event => {
+      event.target.value = '0.02';
+      this.cfg.restitution = 0.02;
+      byId('val-restitution').textContent = '0.02 (locked)';
     });
-    document.getElementById('slider-roughness').addEventListener('change', () => {
-      // Rebuild both physics and rendering from the same terrain seed so the
-      // roughness slider never leaves an old smooth mesh over new collisions.
-      this.loadExperiment(this.cfg.experimentId);
+    on('slider-actuation', 'input', event => {
+      const value = parseFloat(event.target.value);
+      this.cfg.actuationDeltaL = value;
+      byId('val-actuation').textContent = `${value.toFixed(3)} m`;
     });
-
-    document.getElementById('slider-target-speed').addEventListener('input', (e) => {
-      const referenceSpeed = 1.30;
-      e.target.value = String(referenceSpeed);
-      this.cfg.targetSpeed = referenceSpeed;
-      document.getElementById('val-target-speed').textContent = `${referenceSpeed.toFixed(2)} m/s rolling target`;
+    on('slider-roughness', 'input', event => {
+      byId('val-roughness').textContent = `${parseFloat(event.target.value).toFixed(2)} m`;
     });
-
-    document.getElementById('slider-incline')?.addEventListener('input', (e) => {
-      this.cfg.inclineDegrees = parseFloat(e.target.value);
-      document.getElementById('val-incline').textContent = `${this.cfg.inclineDegrees.toFixed(0)}°`;
+    on('slider-roughness', 'change', event => {
+      // Rebuild physics and rendering from the same seed so the mesh and the
+      // contact solver always share one surface.
+      const value = parseFloat(event.target.value);
+      this.loadExperiment(this.cfg.experimentId, { reason: 'parameter-change' });
+      this.cfg.groundRMS = value;
       this.terrain.generateSurface();
-      this.vis.scene.clear();
-      this.vis.initThree();
-      this.vis.createTerrainMesh();
-      this.vis.createRoverObjects();
-      this.vis.createTrajectoryTrail();
-      this.vis.createGeometryCheckpointOverlay();
+      this.rebuildScene();
+      byId('slider-roughness').value = String(value);
+      byId('val-roughness').textContent = `${value.toFixed(2)} m`;
+      syncNumericInputs();
     });
-
-    document.getElementById('btn-toggle-relaxation')?.addEventListener('click', (e) => {
+    on('slider-target-speed', 'input', event => {
+      event.target.value = '1.30';
+      this.cfg.targetSpeed = 1.30;
+      byId('val-target-speed').textContent = '1.30 m/s';
+    });
+    on('slider-incline', 'input', event => {
+      this.cfg.inclineDegrees = parseFloat(event.target.value);
+      byId('val-incline').textContent = `${this.cfg.inclineDegrees.toFixed(0)}°`;
+    });
+    on('slider-incline', 'change', () => {
+      this.terrain.generateSurface();
+      this.rebuildScene();
+    });
+    on('btn-toggle-relaxation', 'click', event => {
       this.cfg.stringRelaxation = !this.cfg.stringRelaxation;
-      e.currentTarget.textContent = `RELAXATION: ${this.cfg.stringRelaxation ? 'ON' : 'OFF'}`;
-      e.currentTarget.classList.toggle('text-violet-300', this.cfg.stringRelaxation);
-      e.currentTarget.classList.toggle('text-slate-400', !this.cfg.stringRelaxation);
+      event.currentTarget.textContent = `RELAXATION: ${this.cfg.stringRelaxation ? 'ON' : 'OFF'}`;
+      event.currentTarget.setAttribute('aria-pressed', String(this.cfg.stringRelaxation));
+      event.currentTarget.classList.toggle('is-on', this.cfg.stringRelaxation);
       this.updateForceLawChart();
     });
 
-    // Structural Optimizer Runner
-    document.getElementById('btn-run-optimization').addEventListener('click', () => {
-      const resultsBox = document.getElementById('opt-results-box');
-      resultsBox.classList.remove('hidden');
-
+    // Structural optimizer
+    on('btn-run-optimization', 'click', () => {
+      byId('opt-results-box').classList.remove('hidden');
       const opt = StructuralOptimizer.runOptimization(this.cfg);
-
-      document.getElementById('opt-pretension').textContent = `${opt.bestConfig.pretension.toFixed(0)} N`;
-      document.getElementById('opt-stiffness').textContent = `${opt.bestConfig.stiffness.toFixed(0)} N/m`;
-      document.getElementById('opt-score').textContent = `${Math.min(99.9, Math.max(70.0, opt.bestScore)).toFixed(1)} / 100`;
-
-      // Apply best parameters to live simulation
+      byId('opt-pretension').textContent = `${opt.bestConfig.pretension.toFixed(0)} N`;
+      byId('opt-stiffness').textContent = `${opt.bestConfig.stiffness.toFixed(0)} N/m`;
+      byId('opt-score').textContent = `${Math.min(99.9, Math.max(70.0, opt.bestScore)).toFixed(1)} / 100`;
       this.cfg.pretensionS = opt.bestConfig.pretension;
       this.cfg.kS = opt.bestConfig.stiffness;
       this.cfg.actuationDeltaL = opt.bestConfig.actuation;
-
-      document.getElementById('slider-pretension').value = opt.bestConfig.pretension;
-      document.getElementById('val-pretension').textContent = `${opt.bestConfig.pretension.toFixed(1)} N`;
-      document.getElementById('slider-stiffness').value = opt.bestConfig.stiffness;
-      document.getElementById('val-stiffness').textContent = `${opt.bestConfig.stiffness.toFixed(0)} N/m`;
-      document.getElementById('slider-actuation').value = opt.bestConfig.actuation;
-      document.getElementById('val-actuation').textContent = `${opt.bestConfig.actuation.toFixed(2)} m`;
-
-      this.runFullBenchmark();
+      byId('slider-pretension').value = opt.bestConfig.pretension;
+      byId('val-pretension').textContent = `${opt.bestConfig.pretension.toFixed(1)} N`;
+      byId('slider-stiffness').value = opt.bestConfig.stiffness;
+      byId('val-stiffness').textContent = `${opt.bestConfig.stiffness.toFixed(0)} N/m`;
+      byId('slider-actuation').value = opt.bestConfig.actuation;
+      byId('val-actuation').textContent = `${opt.bestConfig.actuation.toFixed(3)} m`;
+      syncNumericInputs();
     });
+  }
+
+  rebuildScene() {
+    this.vis.scene.clear();
+    this.vis.initThree();
+    this.vis.createTerrainMesh();
+    this.vis.createRoverObjects();
+    this.vis.createTrajectoryTrail();
+    this.vis.createGeometryCheckpointOverlay();
+  }
+
+  async clearRecords() {
+    this.recorder.commit('reset');
+    await this.persistence.clearAll();
+    this.recorder.lastFinalized = null;
+    this.matrix.render();
+    this.showNotice('All saved benchmark records deleted from browser and disk.', 'ok');
+  }
+
+  showAutoBenchmarkReport(report) {
+    const table = document.getElementById('report-table');
+    if (table) {
+      const rows = AutoBenchmark.reportRows(report);
+      const f = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+      table.innerHTML = `<thead><tr><th>Level</th><th>Status</th><th>Ended by</th><th class="r">t (s)</th>
+        <th class="r">B dist (m)</th><th class="r">B v̄ (m/s)</th><th class="r">B max G</th><th class="r">B T max (N)</th><th class="r">B deform (m)</th>
+        <th class="r">A dist (m)</th><th class="r">A v̄ (m/s)</th></tr></thead><tbody>${rows.map(r => `<tr>
+        <td>L${r.level} · ${r.name}</td><td>${r.status}</td><td>${r.reason}</td><td class="r num">${f(r.simTime, 1)}</td>
+        <td class="r num">${f(r.B_distance, 2)}</td><td class="r num">${f(r.B_avgSpeed, 3)}</td><td class="r num">${f(r.B_maxG, 2)}</td>
+        <td class="r num">${f(r.B_maxTension, 1)}</td><td class="r num">${f(r.B_deformation, 3)}</td>
+        <td class="r num">${f(r.A_distance, 2)}</td><td class="r num">${f(r.A_avgSpeed, 3)}</td></tr>`).join('')}</tbody>`;
+    }
+    const dialog = document.getElementById('dlg-report');
+    if (dialog?.showModal) dialog.showModal();
   }
 }
 
 async function loadCentralSettings() {
+  let payload = {};
   try {
     const response = await fetch(`./config/simulation.settings.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
+    payload = await response.json();
   } catch {
     // Missing or unreadable file: run entirely on built-in defaults.
-    return {};
+    return { settings: {}, issues: [] };
   }
+  const { settings, issues } = validateSettingsFile(payload);
+  return { settings, issues };
 }
 
+function showGlobalNotice(message, kind = 'error') {
+  let notice = document.getElementById('app-notice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'app-notice';
+    notice.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    document.body.appendChild(notice);
+  }
+  notice.className = `app-notice is-${kind}`;
+  notice.textContent = message;
+  clearTimeout(showGlobalNotice.timer);
+  showGlobalNotice.timer = setTimeout(() => notice.remove(), kind === 'error' ? 12000 : 6000);
+}
+
+// Error boundary: any uncaught error pauses the simulation and is shown to
+// the user instead of silently freezing the animation loop.
+// Browser-level notices that are not program errors (e.g. Chart.js layout
+// re-flows trigger "ResizeObserver loop ..."), and errors from other origins
+// (extensions, CDN scripts) without a location, must not stop the simulation.
+const BENIGN_ERRORS = [/ResizeObserver loop/i, /^Script error\.?$/i];
+window.addEventListener('error', event => {
+  const message = String(event.message || '');
+  if (BENIGN_ERRORS.some(pattern => pattern.test(message))) {
+    event.stopImmediatePropagation?.();
+    return;
+  }
+  if (window.app) window.app.isPlaying = false;
+  showGlobalNotice(`Simulation paused after an error: ${event.message}`, 'error');
+});
+window.addEventListener('unhandledrejection', event => {
+  if (window.app) window.app.isPlaying = false;
+  showGlobalNotice(`Simulation paused after an error: ${event.reason?.message || event.reason}`, 'error');
+});
+
 window.addEventListener('DOMContentLoaded', async () => {
-  const centralSettings = await loadCentralSettings();
-  window.app = new App(centralSettings);
+  const { settings, issues } = await loadCentralSettings();
+  try {
+    // Read the shareable URL before the app writes its own state into it.
+    const urlState = readUrlState();
+    window.app = new App(settings);
+    window.app.applyUrlState(urlState);
+  } catch (error) {
+    showGlobalNotice(`Startup failed: ${error.message}`, 'error');
+    throw error;
+  }
+  if (issues.length) showGlobalNotice(`Settings file: ${issues.join(' · ')}`, 'warn');
 });
