@@ -92,6 +92,7 @@ export class RunRecorder {
       physicsCore: cfg.physicsCore,
       actuation: cfg.pureCableActuation ? 'cable-only' : 'assisted',
       gravity: Math.abs(cfg.gravity?.[2] ?? 9.81),
+      material: cfg.material || 'lightweight',
       seed: cfg.seed,
       simTime: 0,
       obstacles: app.obstacleCount?.() ?? null,

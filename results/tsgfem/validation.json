@@ -1,0 +1,138 @@
+{
+ "generatedAt": "2026-10-22T05:51:10.781Z",
+ "checks": [
+  {
+   "name": "self-stress modes (grouped)",
+   "js": 1,
+   "tsgfem": 1,
+   "relError": 0,
+   "ok": true
+  },
+  {
+   "name": "equilibrium-matrix rank",
+   "js": 33,
+   "tsgfem": 33,
+   "relError": 0,
+   "ok": true
+  },
+  {
+   "name": "bar force [N]",
+   "js": -97.97958971132712,
+   "tsgfem": -97.97958971132702,
+   "relError": 1.0152725001145215e-15,
+   "ok": true
+  },
+  {
+   "name": "cable force [N]",
+   "js": 40,
+   "tsgfem": 40,
+   "relError": 0,
+   "ok": true
+  },
+  {
+   "name": "bar force density [N/m]",
+   "js": -115.19664284953099,
+   "tsgfem": -115.19664284953087,
+   "relError": 9.868936707653283e-16,
+   "ok": true
+  },
+  {
+   "name": "min-mass bar radius [m]",
+   "js": 0.0031284601809046624,
+   "tsgfem": 0.003128460180924894,
+   "relError": 6.466966190845762e-12,
+   "ok": true
+  },
+  {
+   "name": "min-mass cable radius [m]",
+   "js": 0.0001471520769612151,
+   "tsgfem": 0.0001471520769612151,
+   "relError": 0,
+   "ok": true
+  },
+  {
+   "name": "min-mass structure [kg]",
+   "js": 0.906958631833841,
+   "tsgfem": 0.9069586318414995,
+   "relError": 8.444200429427816e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 7 [Hz]",
+   "js": 4.925437002607205,
+   "tsgfem": 4.925437002618839,
+   "relError": 2.36207449480443e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 8 [Hz]",
+   "js": 4.925437002621783,
+   "tsgfem": 4.925437002671844,
+   "relError": 1.0163646442417694e-11,
+   "ok": true
+  },
+  {
+   "name": "mode 9 [Hz]",
+   "js": 4.925437002667618,
+   "tsgfem": 4.925437002726284,
+   "relError": 1.1910813384794165e-11,
+   "ok": true
+  },
+  {
+   "name": "mode 10 [Hz]",
+   "js": 5.14666223316943,
+   "tsgfem": 5.146662233175221,
+   "relError": 1.1253529399171921e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 11 [Hz]",
+   "js": 8.593696542751355,
+   "tsgfem": 8.593696542714472,
+   "relError": 4.291808172786307e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 12 [Hz]",
+   "js": 8.593696542760398,
+   "tsgfem": 8.593696542774358,
+   "relError": 1.6244916644845416e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 13 [Hz]",
+   "js": 8.973591864090933,
+   "tsgfem": 8.973591864061795,
+   "relError": 3.247036602296899e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 14 [Hz]",
+   "js": 8.97359186409956,
+   "tsgfem": 8.97359186408109,
+   "relError": 2.0583238792056672e-12,
+   "ok": true
+  },
+  {
+   "name": "mode 15 [Hz]",
+   "js": 8.973591864102612,
+   "tsgfem": 8.973591864100973,
+   "relError": 1.8271138108315266e-13,
+   "ok": true
+  },
+  {
+   "name": "mode 16 [Hz]",
+   "js": 9.276928404903924,
+   "tsgfem": 9.27692840493055,
+   "relError": 2.870110828021388e-12,
+   "ok": true
+  },
+  {
+   "name": "highest mode [Hz]",
+   "js": 1965.2770359049907,
+   "tsgfem": 1965.2770359049798,
+   "relError": 5.553383172896761e-15,
+   "ok": true
+  }
+ ]
+}

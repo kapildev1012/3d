@@ -14,3 +14,6 @@ dist/
 data/
 .vercel/
 node_modules/
+
+# full upstream TsgFEM checkout (the needed parts are in third_party/TsgFEM)
+Tensegrity_Finite_Element_Method_TsgFEM-main/

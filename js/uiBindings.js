@@ -103,7 +103,7 @@ export function trackToolbarHeight() {
 
 // ------------------------------------------------------------------ URL state
 
-const URL_KEYS = ['level', 'gait', 'controller', 'core', 'act', 'g', 'speed', 'cam', 'preset', 'tab'];
+const URL_KEYS = ['level', 'gait', 'controller', 'core', 'act', 'g', 'speed', 'cam', 'preset', 'tab', 'mat'];
 
 export function readUrlState(search = window.location.search) {
   const params = new URLSearchParams(search);

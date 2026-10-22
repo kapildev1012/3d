@@ -12,6 +12,7 @@
     "test": "node --test tests/*.test.mjs",
     "test:research": "node --test tests/lagrangianDae.test.mjs tests/researchMode.test.mjs tests/benchmarkStore.test.mjs",
     "verify": "npm run build && npm test",
+    "tsgfem:validate": "node tools/tsgfem_validate.mjs",
     "seed": "node tools/make_seed_benchmarks.mjs --duration 20",
     "experiments": "node tools/run_experiments.mjs --workers 2 --duration 20",
     "paper:data": "node tools/summarize_experiments.mjs && node tools/make_numbers.mjs && python3 tools/make_figures.py",

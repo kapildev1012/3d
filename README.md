@@ -112,6 +112,22 @@ In the app, press **Research preset** (or choose Physics = *Lagrangian DAE* and 
 
 The *Comparative benchmark* panel runs the same protocol in the browser and has **Copy LaTeX benchmark table**. Every figure window has **Export for IEEE** (SVG, PDF, 600-dpi PNG at 3.5 in or 7.16 in).
 
+## Materials and structural analysis (TsgFEM)
+
+The workstation simulates the **steel build** by default (*Parameters → Struts & cables*, URL `?mat=steel|lightweight`): Ø25 × 1.5 mm S355 steel tube struts (0.739 kg each) and Ø2 mm 1960 MPa UHS steel wire rope in series with the compliant actuator spring (`js/materials.js`). Rope mass is lumped onto the end nodes and the payload. `SimConfig` and the paper experiments keep the original lightweight parameters. Each benchmark record stores its `material`.
+
+*Tools → Structural analysis · TsgFEM* runs a JavaScript port (`js/tsgfem.js`, `js/structuralAnalysis.js`) of the **Tensegrity Finite Element Method** toolbox by Shuo Ma, Muhao Chen and Robert E. Skelton (JOSS 2022, [doi:10.21105/joss.03390](https://doi.org/10.21105/joss.03390), MPL-2.0). The original MATLAB functions and licence are in `third_party/TsgFEM/`. The analysis covers:
+
+- the equilibrium matrix and its SVD (self-stress and mechanism modes);
+- prestress design with grouped members;
+- minimal-mass sizing (buckling and yield);
+- the safety margins of the installed parts;
+- tangent stiffness, consistent mass and modal frequencies.
+
+The simulated icosahedral shape (d/h = 1/φ) has no self-stress state. The statics therefore use TsgFEM's form-found expanded octahedron (d/h = 0.5) with the same bars.
+
+`npm run tsgfem:validate` runs the original toolbox in GNU Octave (or MATLAB) on the exported rover model and compares it with the port. `tests/tsgfem.test.mjs` runs that comparison automatically when Octave is installed.
+
 ## Verify
 
 ```bash

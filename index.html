@@ -238,6 +238,14 @@
           <div class="param-ctl"><input id="slider-target-speed" type="range" min="0.2" max="1.3" step="0.01" value="1.3" disabled data-num data-unit="m/s"></div>
         </div>
         <div class="param">
+          <div class="param-head"><label for="select-material">Struts &amp; cables</label><span id="val-material-mass" class="param-read">—</span></div>
+          <div class="param-ctl"><select id="select-material" class="select">
+            <option value="steel" selected>Steel struts · UHS steel rope</option>
+            <option value="lightweight">Lightweight (original model)</option>
+          </select></div>
+          <p id="material-spec" class="hint">—</p>
+        </div>
+        <div class="param">
           <div class="param-head"><label for="select-actuator-mode">Actuators</label></div>
           <div class="param-ctl"><select id="select-actuator-mode" class="select" disabled><option value="cables" selected>Cables only · rigid rods</option></select></div>
         </div>
@@ -335,6 +343,25 @@
       </section>
 
       <!-- Tools -->
+      <section data-tab-panel="tools" hidden class="panel-section">
+        <h3 class="sec-title">Structural analysis · TsgFEM <span class="sec-note">Ma, Chen &amp; Skelton 2022</span></h3>
+        <p class="hint">Equilibrium matrix, self-stress modes, prestress design, minimal-mass sizing and modal analysis of the current rover, using a JavaScript port of the TsgFEM toolbox (<code>third_party/TsgFEM</code>, MPL-2.0).</p>
+        <button type="button" id="btn-run-tsgfem" class="btn btn-block">Analyze structure</button>
+        <dl id="tsgfem-results" class="kv-list hidden">
+          <dt>Shape d/h</dt><dd id="tsg-ratio" class="num">—</dd>
+          <dt>Self-stress modes</dt><dd id="tsg-modes" class="num">—</dd>
+          <dt>Bar / cable force</dt><dd id="tsg-forces" class="num">—</dd>
+          <dt>Payload cable force</dt><dd id="tsg-core" class="num">—</dd>
+          <dt>Buckling safety</dt><dd id="tsg-buckling" class="num">—</dd>
+          <dt>Cable safety</dt><dd id="tsg-cable" class="num">—</dd>
+          <dt>Min-mass structure</dt><dd id="tsg-minmass" class="num">—</dd>
+          <dt>Installed structure</dt><dd id="tsg-installed" class="num">—</dd>
+          <dt>First elastic modes</dt><dd id="tsg-modal" class="num">—</dd>
+          <dt>Highest mode</dt><dd id="tsg-highest" class="num">—</dd>
+        </dl>
+        <p id="tsgfem-note" class="hint"></p>
+        <button type="button" id="btn-export-tsgfem" class="btn btn-xs" disabled>Export model for MATLAB / Octave TsgFEM</button>
+      </section>
       <section data-tab-panel="tools" hidden class="panel-section">
         <h3 class="sec-title">Structural optimizer <span class="sec-note">27 trials × 0.6 s</span></h3>
         <p class="hint">Quick screen of pretension, stiffness and stroke. Use the paper benchmark or <code>npm run experiments</code> for full-length runs.</p>

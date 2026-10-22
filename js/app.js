@@ -18,6 +18,8 @@ import { AutoBenchmark } from './autoBenchmark.js?v=20261021-ws1';
 import { runsForLevel, toCSV, emptyState } from './benchmarkCore.js?v=20261021-ws1';
 import { LEVELS, configureLevel, levelName } from './levels.js?v=20261021-ws1';
 import { renderFigures } from './figures.js?v=20261021-ws1';
+import { MATERIALS, DEFAULT_APP_MATERIAL, applyMaterial, massBreakdown } from './materials.js?v=20261021-ws1';
+import { roverStructuralModel } from './structuralAnalysis.js?v=20261021-ws1';
 import {
   bindNumericInputs, syncNumericInputs, bindDockTabs, trackToolbarHeight, readUrlState, writeUrlState
 } from './uiBindings.js?v=20261021-ws1';
@@ -242,9 +244,64 @@ class App {
       core: this.cfg.physicsCore,
       act: this.cfg.pureCableActuation ? 'pure' : 'assisted',
       g: Number(Math.abs(this.cfg.gravity?.[2] ?? 9.81).toFixed(3)),
+      mat: this.cfg.material || DEFAULT_APP_MATERIAL,
       speed: this.simSpeed,
       cam: document.getElementById('select-camera')?.value || 'chase'
     });
+  }
+
+  /** Switch strut/cable material (masses, inertia, series cable stiffness). */
+  setMaterial(id, { rebuild = true } = {}) {
+    if (!MATERIALS[id]) return;
+    applyMaterial(this.cfg, id);
+    this.updateMaterialReadout();
+    this.tsgfemResult = null;
+    if (rebuild) this.loadExperiment(this.cfg.experimentId, { reason: 'parameter-change' });
+    this.syncUrl();
+  }
+
+  updateMaterialReadout() {
+    const id = this.cfg.material || 'lightweight';
+    const material = MATERIALS[id];
+    const mass = massBreakdown(id);
+    const byId = key => document.getElementById(key);
+    if (byId('select-material')) byId('select-material').value = id;
+    if (byId('val-material-mass')) byId('val-material-mass').textContent = `${mass.total.toFixed(2)} kg · ${(mass.total*9.81).toFixed(1)} N`;
+    if (byId('material-spec')) {
+      byId('material-spec').textContent = material.strut
+        ? `${material.strutSpec}: ${material.strutMass.toFixed(3)} kg each, buckling ${(material.strut.bucklingLoad/1000).toFixed(1)} kN. `
+          + `${material.cableSpec}: breaking ${(material.rope.breakingForce/1000).toFixed(2)} kN, effective k ${material.kS.toFixed(0)} N/m.`
+        : `${material.strutSpec}; ${material.cableSpec.toLowerCase()}.`;
+    }
+    if (byId('slider-stiffness')) byId('slider-stiffness').value = String(Math.round(this.cfg.kS));
+    if (byId('val-stiffness')) byId('val-stiffness').textContent = `${this.cfg.kS.toFixed(0)} N/m`;
+  }
+
+  /** TsgFEM statics + modal analysis of the current rover (Tools tab). */
+  runStructuralAnalysis() {
+    const byId = key => document.getElementById(key);
+    const { js, input } = roverStructuralModel({ material: this.cfg.material || 'lightweight', config: this.cfg });
+    this.tsgfemResult = { js, input };
+    const set = (key, text) => { const el = byId(key); if (el) el.textContent = text; };
+    const ff = js.formFinding, pre = js.prestress, mm = js.minimalMass, ins = js.installed;
+    set('tsg-ratio', `${ff.modelledRatio.toFixed(3)} modelled → ${ff.equilibriumRatio.toFixed(2)} equilibrium`);
+    set('tsg-modes', `${ff.modelledSelfStressModes} modelled · ${ff.equilibriumSelfStressModes} form-found`);
+    set('tsg-forces', `${pre.barForce.toFixed(1)} N / ${pre.cableForce.toFixed(1)} N`);
+    set('tsg-core', Math.abs(pre.coreForce) < 1e-6*Math.abs(pre.cableForce) ? '0 N (not in the self-stress state)' : `${pre.coreForce.toFixed(1)} N`);
+    const safety = v => (v === null || !Number.isFinite(v) ? 'n/a' : `${v.toFixed(0)}×`);
+    set('tsg-buckling', safety(ins.bucklingSafety));
+    set('tsg-cable', safety(ins.cableSafety));
+    set('tsg-minmass', `${mm.structureMass.toFixed(3)} kg (bar r ${(mm.barRadius*1000).toFixed(1)} mm, cable r ${(mm.cableRadius*1000).toFixed(2)} mm)`);
+    const breakdown = massBreakdown(this.cfg.material || 'lightweight');
+    set('tsg-installed', `${(breakdown.struts+breakdown.cables).toFixed(3)} kg struts + cables`);
+    set('tsg-modal', js.modal.elasticHz.slice(0, 5).map(f => f.toFixed(2)).join(', ')+' Hz');
+    set('tsg-highest', `${js.modal.highestHz.toFixed(0)} Hz (bar axial)`);
+    set('tsgfem-note', ff.usedEquilibriumShape
+      ? 'The simulated icosahedral shape (d/h = 1/φ) has no self-stress state, so statics use the TsgFEM form-found expanded octahedron (d/h = 0.5) with the same bars. Bar axial modes sit far above the shell modes, which supports treating struts as rigid in the simulator.'
+      : 'The simulated shape is prestressable as modelled.');
+    byId('tsgfem-results')?.classList.remove('hidden');
+    if (byId('btn-export-tsgfem')) byId('btn-export-tsgfem').disabled = false;
+    return js;
   }
 
   /** Apply ?level=&gait=&controller=&core=&act=&g=&speed=&cam=&preset= on startup. */
@@ -269,6 +326,11 @@ class App {
       if (state.controller && document.querySelector(`#select-controller option[value="${CSS.escape(state.controller)}"]`)) {
         rebuild ||= this.cfg.controllerMode !== state.controller;
         this.cfg.controllerMode = state.controller;
+      }
+      if (state.mat && MATERIALS[state.mat] && state.mat !== this.cfg.material) {
+        this.setMaterial(state.mat, { rebuild: false });
+        rebuild = false;
+        this.loadExperiment(this.cfg.experimentId, { reason: 'url' });
       }
       if (rebuild) { this.simA.reset(); this.simB.reset(); }
       if (state.gait && document.querySelector(`#select-gait-mode option[value="${CSS.escape(state.gait)}"]`)) {
@@ -309,6 +371,9 @@ class App {
       targetGoalY: 60,
       monitoring: { ...(this.centralSettings.monitoring || {}) }
     }).applyLevel10PerformanceProfile();
+    // The workstation simulates the steel build by default; SimConfig and the
+    // paper/CLI experiments keep the original lightweight parameters.
+    applyMaterial(this.cfg, DEFAULT_APP_MATERIAL);
     this.rover = new SphericalRoverModel(this.cfg);
     this.terrain = new TerrainModel(this.cfg);
     this.routeLearner = new AdaptiveRouteLearner({
@@ -1472,6 +1537,18 @@ class App {
     on('slider-stiffness', 'change', event => {
       this.cfg.kS = parseFloat(event.target.value);
       this.loadExperiment(this.cfg.experimentId, { reason: 'parameter-change' });
+    });
+    on('select-material', 'change', event => this.setMaterial(event.target.value));
+    this.updateMaterialReadout();
+    on('btn-run-tsgfem', 'click', () => {
+      try { this.runStructuralAnalysis(); } catch (error) {
+        console.error('[tsgfem]', error);
+        byId('tsgfem-note').textContent = `Analysis failed: ${error.message}`;
+      }
+    });
+    on('btn-export-tsgfem', 'click', () => {
+      if (!this.tsgfemResult) return;
+      downloadText(`rover_tsgfem_${this.cfg.material || 'model'}.json`, JSON.stringify(this.tsgfemResult.input, null, 1), 'application/json;charset=utf-8');
     });
     on('slider-restitution', 'input', event => {
       event.target.value = '0.02';
