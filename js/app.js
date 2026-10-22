@@ -630,7 +630,7 @@ class App {
       ilqr: 'iLQR', ilqr_minimax: 'MM-iLQR', ilqr_minimax_penalty: 'MM-iLQR+P',
       qp_mpc: 'MPC', qp_mpc_payload: 'MPC+P', neural: 'NN',
       riccati_lqr: 'Ric-LQR', ilqr_true: 'iLQR-T',
-      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC'
+      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC', mpc_gps: 'MPC+GPS'
     };
     return map[mode] || mode || '—';
   }
@@ -723,6 +723,10 @@ class App {
     setText('drive-completed-rolls', String(diagB.completedRolls || 0));
     setText('drive-active-cables', `${diagB.activeCableCount || 0}C / ${this.rover.outerStrings.length} · ${diagB.activeRodCount || 0}R / ${this.rover.bars.length}`);
     setText('drive-relaxation', `${Math.round((diagB.relaxationFraction || 0)*100)}%`);
+    const gps = this.simB?.controlDiagnostics?.gps;
+    setText('drive-gps', gps
+      ? `est. err ${gps.error.toFixed(2)} m · σ ${gps.sigma.toFixed(2)} m · e ${gps.crossTrack.toFixed(2)} m · ${gps.fixes} fixes`
+      : 'off (select MPC + GPS)');
     const summaryA = mA.obstacleSummary || { over: 0, around: 0, retries: 0 };
     const summaryB = mB.obstacleSummary || { over: 0, around: 0, retries: 0, bypassViolations: 0 };
     setText('hud-a-obstacles', `${summaryA.over} over / ${summaryA.around} around`);

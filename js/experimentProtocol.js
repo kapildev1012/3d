@@ -49,6 +49,10 @@ export const METHODS = Object.freeze({
     label: 'QP-MPC effort + support face', short: 'QP-MPC',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'qp_mpc_proj'; }
   },
+  mpcGps: {
+    label: 'MPC + GPS (Kalman-fused steering + QP-MPC effort)', short: 'MPC+GPS',
+    configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'mpc_gps'; }
+  },
   legacyAssisted: {
     label: 'Legacy engine with external assists (not admissible)', short: 'Legacy+assist', reference: true,
     configure: cfg => {

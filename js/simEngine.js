@@ -4,6 +4,7 @@ import {
   solveAdvancedController
 } from './advancedControllers.js?v=20261021-ws1';
 import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
+import { GpsMpcNavigator } from './gpsNavigation.js?v=20261021-ws1';
 import {
   createABCourse,
   evaluateCourseObstacle,
@@ -1902,6 +1903,8 @@ export class Simulation {
     this.completedRolls = 0;
     this.dynamicNodeMass = this.cfg.nodeMass + 0.5*this.cfg.strutMass;
     this.sgt = null;
+    this.gpsNav = null;
+    this.gpsState = null;
     this.plantCoreMass = this.cfg.coreMass*(this.cfg.plantPayloadMassScale ?? 1);
     this.commandQueue = [];
     this.pendingImpulse = null;
@@ -2435,10 +2438,36 @@ export class Simulation {
       grade: surfaceAhead.dhdy,
       energy: kineticEnergy
     });
-    const desiredDirection = this.desiredDirectionForMode(centroid, obstacle, velocity, this.learningCommand);
+    let desiredDirection = this.desiredDirectionForMode(centroid, obstacle, velocity, this.learningCommand);
+
+    // MPC + GPS: steer from a Kalman-filtered GNSS estimate instead of the
+    // true centre of mass; the steering MPC sets the rolling direction and
+    // the QP-MPC below sets the cable effort from the estimated speed.
+    let controlVelocity = velocity;
+    if (this.modelType === 'adaptive' && cfg.controllerMode === 'mpc_gps' && cfg.actuationMode !== 'none') {
+      if (!this.gpsNav) {
+        this.gpsNav = new GpsMpcNavigator({
+          gps: cfg.gps || {}, mpc: cfg.gpsMpc || {}, seed: cfg.seed ?? 42,
+          goal: (cfg.targetDestination || [0, cfg.targetGoalY || 25]).slice(0, 2)
+        });
+      }
+      const ref = cfg.targetSpeed*(this.learningCommand?.speedScale || 1);
+      const nav = this.gpsNav.step(this.t, centroid, { forwardSpeeds: [Math.max(0.15, Math.min(ref, 1.2))] });
+      this.gpsState = nav;
+      if (nav) {
+        controlVelocity = [nav.velocity[0], nav.velocity[1], velocity[2]];
+        const courseObstacle = this.terrain.course && obstacle?.detected;
+        const reverse = desiredDirection[1]*Math.sign((cfg.targetDestination?.[1] ?? 25)-nav.position[1]) < 0;
+        // Obstacle negotiation on the A/B course keeps its dedicated logic.
+        if (!courseObstacle && !reverse && cfg.actuationMode !== 'roll_backward') desiredDirection = nav.direction;
+      }
+    }
 
     // Sensitivity-Gradient Tipping: physically admissible cable-only gait.
-    if (this.modelType === 'adaptive' && cfg.controllerMode === 'sgt_tipping') {
+    // MPC + GPS in cable-only mode realizes its GPS-MPC heading with the same
+    // admissible tipping gait (the support-face gait barely rolls without aids).
+    const gpsTipping = cfg.controllerMode === 'mpc_gps' && cfg.pureCableActuation;
+    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gpsTipping)) {
       if (!this.sgt) this.sgt = new SensitivityTippingController(this, cfg.sgtOptions || {});
       const command = this.sgt.update(centroid, velocity, omega, desiredDirection);
       this.locomotionState = command.state;
@@ -2453,8 +2482,9 @@ export class Simulation {
         coreTargets: command.coreTargets,
         rodTargets: new Array(this.rover.bars.length).fill(0),
         diagnostics: {
-          mode: 'sgt_tipping',
-          modeLabel: 'SGT · sensitivity-gradient tipping (cable-only)',
+          mode: gpsTipping ? 'mpc_gps' : 'sgt_tipping',
+          modeLabel: gpsTipping ? 'MPC + GPS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
+          gps: gpsTipping && this.gpsState ? this.gpsDiagnostics() : null,
           desiredDirection,
           predictedPath: [[centroid[0], centroid[1], centroid[2]],
             [centroid[0]+desiredDirection[0], centroid[1]+desiredDirection[1], centroid[2]]],
@@ -2482,7 +2512,7 @@ export class Simulation {
     // which cables realize that effort geometrically.
     let advancedSolution = null;
     if (this.modelType === 'adaptive' && ADVANCED_MODES.has(cfg.controllerMode)) {
-      const planarSpeed = velocity[0]*desiredDirection[0]+velocity[1]*desiredDirection[1];
+      const planarSpeed = controlVelocity[0]*desiredDirection[0]+controlVelocity[1]*desiredDirection[1];
       const slopeDisturbance = Math.min(0.6, Math.abs(surfaceAhead?.dhdy || 0));
       try {
         advancedSolution = solveAdvancedController(cfg.controllerMode, {
@@ -2648,8 +2678,18 @@ export class Simulation {
         solverIterations: advancedMode ? advancedSolution.iterations : 0,
         solverConverged: advancedMode ? advancedSolution.converged : null,
         solverWorstCaseCost: advancedMode ? advancedSolution.worstCaseCost : null,
-        solverMs: advancedMode ? advancedSolution.solveMs : null
+        solverMs: advancedMode ? advancedSolution.solveMs : null,
+        gps: cfg.controllerMode === 'mpc_gps' && this.gpsState ? this.gpsDiagnostics() : null
       }
+    };
+  }
+
+  gpsDiagnostics() {
+    const g = this.gpsState;
+    return {
+      estimate: g.position, sigma: g.sigma, error: g.truthError, crossTrack: g.crossTrack,
+      headingError: g.psi, headingCommand: g.psiCommand, fixes: g.fixes, dropped: g.dropped,
+      rejected: g.rejected, mpcIterations: g.mpcIterations
     };
   }
 

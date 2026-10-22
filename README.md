@@ -112,6 +112,12 @@ In the app, press **Research preset** (or choose Physics = *Lagrangian DAE* and 
 
 The *Comparative benchmark* panel runs the same protocol in the browser and has **Copy LaTeX benchmark table**. Every figure window has **Export for IEEE** (SVG, PDF, 600-dpi PNG at 3.5 in or 7.16 in).
 
+## MPC + GPS controller
+
+*Controller → MPC + GPS · Kalman-fused path tracking* (`js/gpsNavigation.js`) steers from a simulated GNSS receiver instead of the true centre of mass. The receiver gives 5 Hz fixes with 0.30 m noise, a slowly drifting 0.20 m bias, 0.2 s latency and 3 % dropouts. A constant-velocity Kalman filter fuses the delayed fixes and rejects outliers with a χ² gate. A steering MPC then plans the heading over a 3 s horizon (cross-track error and heading error, heading rate limited to ±0.6 rad/s) along the start → goal line.
+
+The rolling effort comes from the existing QP-MPC in the default engine. In cable-only research mode, the MPC + GPS heading drives the SGT tipping gait, because the support-face gait barely rolls without aids. *Gait → GPS / Kalman* shows the estimate error, the filter σ and the cross-track error. Receiver and MPC settings can be overridden with `cfg.gps` and `cfg.gpsMpc`. The paper benchmark lists it as *MPC + GPS*.
+
 ## Materials and structural analysis (TsgFEM)
 
 The workstation simulates the **steel build** by default (*Parameters → Struts & cables*, URL `?mat=steel|lightweight`): Ø25 × 1.5 mm S355 steel tube struts (0.739 kg each) and Ø2 mm 1960 MPa UHS steel wire rope in series with the compliant actuator spring (`js/materials.js`). Rope mass is lumped onto the end nodes and the payload. `SimConfig` and the paper experiments keep the original lightweight parameters. Each benchmark record stores its `material`.

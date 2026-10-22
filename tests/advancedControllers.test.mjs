@@ -19,9 +19,9 @@ const BASE_CONTEXT = () => ({
   }
 });
 
-test('advanced mode registry exposes the four ported Drive solvers', () => {
+test('advanced mode registry exposes the four ported Drive solvers plus MPC + GPS', () => {
   assert.deepEqual([...ADVANCED_MODES].sort(), [
-    'ilqr_minimax_true', 'ilqr_true', 'qp_mpc_proj', 'riccati_lqr'
+    'ilqr_minimax_true', 'ilqr_true', 'mpc_gps', 'qp_mpc_proj', 'riccati_lqr'
   ]);
 });
 

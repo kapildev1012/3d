@@ -24,7 +24,8 @@ export const ADVANCED_CONTROLLER_LABELS = {
   riccati_lqr: 'LQR · Riccati Backward Pass',
   ilqr_true: 'iLQR · Nonlinear Rollout',
   ilqr_minimax_true: 'Robust iLQR · Adversarial Disturbance',
-  qp_mpc_proj: 'QP-MPC · Projected Gradient'
+  qp_mpc_proj: 'QP-MPC · Projected Gradient',
+  mpc_gps: 'MPC + GPS · Kalman-fused path tracking'
 };
 
 export const ADVANCED_MODES = new Set(Object.keys(ADVANCED_CONTROLLER_LABELS));
@@ -351,7 +352,8 @@ export function solveAdvancedController(mode, context) {
     case 'riccati_lqr': solution = solveRiccatiLqr(ctx); break;
     case 'ilqr_true': solution = solveIlqr(ctx, { maxOuter: 4 }); break;
     case 'ilqr_minimax_true': solution = solveIlqr(ctx, { maxOuter: 4, adversarial: true }); break;
-    case 'qp_mpc_proj': solution = solveProjectedMpc(ctx); break;
+    case 'qp_mpc_proj':
+    case 'mpc_gps': solution = solveProjectedMpc(ctx); break;
     default: throw new Error(`Unknown advanced controller mode: ${mode}`);
   }
   solution.solveMs = performance.now()-started;
