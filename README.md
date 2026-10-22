@@ -108,6 +108,7 @@ In the app, press **Research preset** (or choose Physics = *Lagrangian DAE* and 
 | `npm run test:research` | DAE, corrector, ledger, SGT, schema and LaTeX tests |
 | `npm run experiments` | full protocol: 6 methods, 10 scenarios, 7 ablations, 3 terrains (114 runs, resumable, `results/paper/runs/`) |
 | `npm run paper:data` | `results/paper/tables.tex`, `numbers.tex`, figures (PDF/SVG/600-dpi PNG) |
+| `node tools/train_guided_policy.mjs` | MPC-guided policy search training + held-out evaluation |
 | `npm run paper:pdf` | builds `paper/main.pdf` (needs LaTeX; IEEEtran is bundled) |
 
 The *Comparative benchmark* panel runs the same protocol in the browser and has **Copy LaTeX benchmark table**. Every figure window has **Export for IEEE** (SVG, PDF, 600-dpi PNG at 3.5 in or 7.16 in).
@@ -117,6 +118,24 @@ The *Comparative benchmark* panel runs the same protocol in the browser and has 
 *Controller → MPC + GPS · Kalman-fused path tracking* (`js/gpsNavigation.js`) steers from a simulated GNSS receiver instead of the true centre of mass. The receiver gives 5 Hz fixes with 0.30 m noise, a slowly drifting 0.20 m bias, 0.2 s latency and 3 % dropouts. A constant-velocity Kalman filter fuses the delayed fixes and rejects outliers with a χ² gate. A steering MPC then plans the heading over a 3 s horizon (cross-track error and heading error, heading rate limited to ±0.6 rad/s) along the start → goal line.
 
 The rolling effort comes from the existing QP-MPC in the default engine. In cable-only research mode, the MPC + GPS heading drives the SGT tipping gait, because the support-face gait barely rolls without aids. *Gait → GPS / Kalman* shows the estimate error, the filter σ and the cross-track error. Receiver and MPC settings can be overridden with `cfg.gps` and `cfg.gpsMpc`. The paper benchmark lists it as *MPC + GPS*.
+
+## MPC-guided policy search controller
+
+*Controller → MPC-guided policy search · learned policy* (`js/guidedPolicySearch.js`) is a neural cable policy trained with Guided Policy Search (Levine & Koltun 2013). It uses the MPC-guided variant of Zhang et al. (ICRA 2016), which was applied to SUPERball by Zhang et al. (ICRA 2017).
+
+- **Teacher (MPC):** a receding-horizon QP on the SGT gait's pinned quasi-static KKT sensitivity model, over 6 steps of 50 ms. It enforces box limits and spool-rate limits, and adds a proximity term λ‖ũ₁ − π_θ(o)‖² that pulls it toward the learner. With λ = 0 and no rate limit, its first step is exactly the SGT command.
+- **Learner:** two small MLPs, one shared by the 24 outer cables and one by the 12 payload cables. They use local features in the frame of the rolling direction, so the policy does not depend on which face the rover rests on. At run time the policy replaces the KKT solve, while the settle → shift → tip → release cycle is kept.
+- **Training** (`node tools/train_guided_policy.mjs`): iteration 0 imitates the teacher. Each later iteration rolls out the policy-regularized teacher, plus one episode that executes the policy itself. Every visited state is labelled with the unregularized teacher, and the policy is retrained on all data so far. The script writes `js/guidedPolicyWeights.js` and `results/guided_policy/{training,evaluation}.json`, which includes a held-out comparison against SGT and the teacher.
+
+Shipped policy, trained for 8 iterations (114k labelled actuator samples) and evaluated on 4 held-out runs (seeds 101–104, Levels 1 and 3, straight and ±6 m offset goals, 20 s, cable-only DAE):
+
+| | progress | tips | aborts | controller time |
+| --- | --- | --- | --- | --- |
+| SGT | 2.11 m | 11.0 | 0.25 | 0.53 ms |
+| MPC teacher | 2.27 m | 10.8 | 0.25 | 0.63 ms |
+| learned policy | 1.89 m | 11.5 | 0.50 | 0.73 ms |
+
+The policy reaches 90 % of SGT's progress without solving the KKT model every tick. It still uses one sensitivity solve per tip cycle to choose a feasible edge (`cfg.guidedPolicy.edgeSelection = 'alignment'` drops that, at a cost in progress). It is not faster than SGT on this small structure.
 
 ## Materials and structural analysis (TsgFEM)
 

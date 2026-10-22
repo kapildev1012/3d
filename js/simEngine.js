@@ -5,6 +5,16 @@ import {
 } from './advancedControllers.js?v=20261021-ws1';
 import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
 import { GpsMpcNavigator } from './gpsNavigation.js?v=20261021-ws1';
+import { GuidedPolicy, solveTeacherQp, actuatorBounds } from './guidedPolicySearch.js?v=20261021-ws1';
+import { GUIDED_POLICY_WEIGHTS } from './guidedPolicyWeights.js?v=20261021-ws1';
+
+let sharedGuidedPolicy = null;
+/** Policy used by controllerMode 'guided_policy' (cfg.guidedPolicy.policy overrides the trained weights). */
+function guidedPolicyFor(cfg) {
+  if (cfg.guidedPolicy?.policy) return cfg.guidedPolicy.policy;
+  if (!sharedGuidedPolicy) sharedGuidedPolicy = new GuidedPolicy(GUIDED_POLICY_WEIGHTS);
+  return sharedGuidedPolicy;
+}
 import {
   createABCourse,
   evaluateCourseObstacle,
@@ -2467,8 +2477,26 @@ export class Simulation {
     // MPC + GPS in cable-only mode realizes its GPS-MPC heading with the same
     // admissible tipping gait (the support-face gait barely rolls without aids).
     const gpsTipping = cfg.controllerMode === 'mpc_gps' && cfg.pureCableActuation;
-    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gpsTipping)) {
-      if (!this.sgt) this.sgt = new SensitivityTippingController(this, cfg.sgtOptions || {});
+    const guided = cfg.controllerMode === 'guided_policy';
+    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gpsTipping || guided)) {
+      if (!this.sgt) {
+        const options = { ...(cfg.sgtOptions || {}) };
+        if (guided) {
+          // Guided policy search: deploy the learned policy, or (training) the
+          // MPC teacher regularized toward it.
+          const gp = cfg.guidedPolicy || {};
+          options.policy = gp.usePolicy === false ? null : guidedPolicyFor(cfg);
+          options.policyEdgeSelection = gp.edgeSelection || 'feasibility';
+          if (gp.teacher) {
+            const teacherOptions = { ...(typeof gp.teacher === 'object' ? gp.teacher : {}) };
+            options.teacher = { bounds: actuatorBounds, solve: args => solveTeacherQp(args, teacherOptions),
+              regularized: (teacherOptions.lambda || 0) > 0 };
+            options.onSample = gp.onSample || null;
+            options.executePolicy = Boolean(gp.executePolicy);
+          }
+        }
+        this.sgt = new SensitivityTippingController(this, options);
+      }
       const command = this.sgt.update(centroid, velocity, omega, desiredDirection);
       this.locomotionState = command.state;
       this.completedRolls = this.sgt.tipCount;
@@ -2482,8 +2510,10 @@ export class Simulation {
         coreTargets: command.coreTargets,
         rodTargets: new Array(this.rover.bars.length).fill(0),
         diagnostics: {
-          mode: gpsTipping ? 'mpc_gps' : 'sgt_tipping',
-          modeLabel: gpsTipping ? 'MPC + GPS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
+          mode: guided ? 'guided_policy' : gpsTipping ? 'mpc_gps' : 'sgt_tipping',
+          modeLabel: guided
+            ? (cfg.guidedPolicy?.teacher ? 'Guided policy search · MPC teacher' : 'Guided policy search · learned policy (MPC-guided)')
+            : gpsTipping ? 'MPC + GPS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
           gps: gpsTipping && this.gpsState ? this.gpsDiagnostics() : null,
           desiredDirection,
           predictedPath: [[centroid[0], centroid[1], centroid[2]],

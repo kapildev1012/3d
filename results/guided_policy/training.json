@@ -1,0 +1,530 @@
+[
+ {
+  "iteration": 0,
+  "lambda": 0,
+  "samples": 14256,
+  "lossOuter": 0.0010863954632734435,
+  "lossCore": 0.0014119876984851237,
+  "minutes": 1.6202166666666666,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.5767460480581064,
+    "crossTrack": 0.2957711614909547,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 0.7209514633331181,
+    "wallSeconds": 44.731
+   },
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.7794604388321855,
+    "crossTrack": 0.1739139700289311,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 0.7962075633332771,
+    "wallSeconds": 43.68
+   },
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     -10,
+     25
+    ],
+    "progress": 1.623702512181377,
+    "crossTrack": 0.14716614157862637,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 0.6719526833331997,
+    "wallSeconds": 41.075
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.2330852070312668,
+    "crossTrack": 0.21045488214241967,
+    "tips": 7,
+    "aborts": 1,
+    "controllerMs": 0.6916642333334146,
+    "wallSeconds": 42.673
+   }
+  ]
+ },
+ {
+  "iteration": 1,
+  "lambda": 0.5,
+  "samples": 29340,
+  "lossOuter": 0.0008486234263017057,
+  "lossCore": 0.0013499488134516243,
+  "minutes": 1.5554,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     8,
+     25
+    ],
+    "progress": 1.6324283795829944,
+    "crossTrack": 0.03467343620141221,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.0993221833332925,
+    "wallSeconds": 42.881
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     -8,
+     25
+    ],
+    "progress": 1.6580745071419425,
+    "crossTrack": 0.05958525535402984,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.1274643499999824,
+    "wallSeconds": 43.314
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.1382177678096006,
+    "crossTrack": 0.10958516829865499,
+    "tips": 7,
+    "aborts": 1,
+    "controllerMs": 1.3347284733333304,
+    "wallSeconds": 41.214
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.0415794616255585,
+    "crossTrack": 0.1284718405768549,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.1938468433333091,
+    "wallSeconds": 39.417
+   }
+  ]
+ },
+ {
+  "iteration": 2,
+  "lambda": 1,
+  "samples": 42480,
+  "lossOuter": 0.0006748115013867587,
+  "lossCore": 0.0012304831250957186,
+  "minutes": 1.6614166666666668,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     -10,
+     25
+    ],
+    "progress": 1.412084589094292,
+    "crossTrack": 0.30569238721470626,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.0578544100000722,
+    "wallSeconds": 41.355
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.6952581158765725,
+    "crossTrack": 0.1911979586885845,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.173602443333216,
+    "wallSeconds": 44.8
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     8,
+     25
+    ],
+    "progress": 1.7759299840475873,
+    "crossTrack": 0.01675298889864964,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.035177443333367,
+    "wallSeconds": 40.602
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     -8,
+     25
+    ],
+    "progress": 1.7823151901175114,
+    "crossTrack": 0.049692912903047,
+    "tips": 10,
+    "aborts": 0,
+    "controllerMs": 1.0241322999999591,
+    "wallSeconds": 40.977
+   }
+  ]
+ },
+ {
+  "iteration": 3,
+  "lambda": 2,
+  "samples": 58392,
+  "lossOuter": 0.000555674377214675,
+  "lossCore": 0.0011361225366277876,
+  "minutes": 1.7593333333333334,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.7571874758071546,
+    "crossTrack": 0.012591931623268438,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.1307110099998439,
+    "wallSeconds": 44.974
+   },
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.65879045432155,
+    "crossTrack": 0.2807894878367476,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.0742419333335118,
+    "wallSeconds": 40.961
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     -10,
+     25
+    ],
+    "progress": 1.6144094339241677,
+    "crossTrack": 0.09033526243693835,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.1402995733334245,
+    "wallSeconds": 40.672
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.0327129024055646,
+    "crossTrack": 0.17134308232592407,
+    "tips": 5,
+    "aborts": 1,
+    "controllerMs": 1.42987525666668,
+    "wallSeconds": 41.378
+   }
+  ]
+ },
+ {
+  "iteration": 4,
+  "lambda": 2,
+  "samples": 71892,
+  "lossOuter": 0.0005342052184001868,
+  "lossCore": 0.0010878832020019013,
+  "minutes": 1.8808333333333334,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     8,
+     25
+    ],
+    "progress": 1.686680472150292,
+    "crossTrack": 0.19320373414576425,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.0163183599999108,
+    "wallSeconds": 41.842
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     -8,
+     25
+    ],
+    "progress": 1.7019519586301606,
+    "crossTrack": 0.0051793886507420445,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 0.9920750200000352,
+    "wallSeconds": 47.858
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.5704144223651817,
+    "crossTrack": 0.23462654665984922,
+    "tips": 10,
+    "aborts": 0,
+    "controllerMs": 1.0405044233332779,
+    "wallSeconds": 41.507
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.671738567582025,
+    "crossTrack": 0.2160038102251705,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.1237226299999008,
+    "wallSeconds": 41.083
+   }
+  ]
+ },
+ {
+  "iteration": 5,
+  "lambda": 2,
+  "samples": 87192,
+  "lossOuter": 0.0004930296868928432,
+  "lossCore": 0.0009752643873678942,
+  "minutes": 1.8674166666666667,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     -10,
+     25
+    ],
+    "progress": 1.645659872267844,
+    "crossTrack": 0.11931090731725058,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.0918521533333843,
+    "wallSeconds": 40.755
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.9490757573182862,
+    "crossTrack": 0.13045084477179858,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.179508276666524,
+    "wallSeconds": 41.138
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     8,
+     25
+    ],
+    "progress": 1.0297067203416035,
+    "crossTrack": 0.21602706114028114,
+    "tips": 5,
+    "aborts": 1,
+    "controllerMs": 1.3804784700000303,
+    "wallSeconds": 42.546
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     -8,
+     25
+    ],
+    "progress": 1.679471782244857,
+    "crossTrack": 0.002695472288983418,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.047554523333271,
+    "wallSeconds": 42.079
+   }
+  ]
+ },
+ {
+  "iteration": 6,
+  "lambda": 2,
+  "samples": 100872,
+  "lossOuter": 0.00045899412771097613,
+  "lossCore": 0.0008810221534236746,
+  "minutes": 1.9312,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.7268518423862176,
+    "crossTrack": 0.10383980855495363,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.1911116933335946,
+    "wallSeconds": 40.738
+   },
+   {
+    "mode": "teacher",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.5759674970183772,
+    "crossTrack": 0.20345101689788858,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.133223926666681,
+    "wallSeconds": 40.883
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     -10,
+     25
+    ],
+    "progress": 1.3697073687711685,
+    "crossTrack": 0.21748163859796968,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.0413021566666516,
+    "wallSeconds": 40.708
+   },
+   {
+    "mode": "policy",
+    "level": 3,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 0.993524299392433,
+    "crossTrack": 0.10273891363363802,
+    "tips": 6,
+    "aborts": 1,
+    "controllerMs": 1.2209477066665742,
+    "wallSeconds": 40.942
+   }
+  ]
+ },
+ {
+  "iteration": 7,
+  "lambda": 2,
+  "samples": 113508,
+  "lossOuter": 0.00042864136006643273,
+  "lossCore": 0.0007979652995368889,
+  "minutes": 2.0502,
+  "episodes": [
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     8,
+     25
+    ],
+    "progress": 1.5434408624604108,
+    "crossTrack": 0.15146799615575593,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 0.9841473266666119,
+    "wallSeconds": 42.461
+   },
+   {
+    "mode": "teacher",
+    "level": 3,
+    "target": [
+     -8,
+     25
+    ],
+    "progress": 1.6003736497349987,
+    "crossTrack": 0.07648262069961209,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.1555018633332104,
+    "wallSeconds": 44.621
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     0,
+     25
+    ],
+    "progress": 1.970121709522757,
+    "crossTrack": 0.13780095881551824,
+    "tips": 9,
+    "aborts": 0,
+    "controllerMs": 1.121785079999862,
+    "wallSeconds": 41.063
+   },
+   {
+    "mode": "policy",
+    "level": 1,
+    "target": [
+     10,
+     25
+    ],
+    "progress": 1.666950159830923,
+    "crossTrack": 0.2549824798881943,
+    "tips": 8,
+    "aborts": 0,
+    "controllerMs": 1.0169322733331947,
+    "wallSeconds": 41.175
+   }
+  ]
+ }
+]

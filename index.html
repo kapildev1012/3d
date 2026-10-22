@@ -95,6 +95,7 @@
           <option value="ilqr_minimax_true">Robust iLQR · adversarial</option>
           <option value="qp_mpc_proj">QP-MPC · projected gradient</option>
           <option value="mpc_gps">MPC + GPS · Kalman-fused path tracking</option>
+          <option value="guided_policy">MPC-guided policy search · learned policy</option>
         </optgroup>
         <optgroup label="Adaptive profiles">
           <option value="lqr">LQR rolling direction</option>
@@ -602,6 +603,7 @@
         <label class="check"><input type="checkbox" name="bench-method" value="ilqr"> iLQR effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="mpc"> QP-MPC effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="mpcGps"> MPC + GPS</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="guidedPolicy"> Guided policy (MPC-GPS)</label>
         <label class="check"><input type="checkbox" name="bench-method" value="legacyAssisted"> Legacy + assists †</label>
       </fieldset>
       <div class="form-grid exp-grid">

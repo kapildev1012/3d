@@ -247,6 +247,8 @@ export class SensitivityTippingController {
   plan(direction) {
     const sim = this.sim, cfg = sim.cfg;
     const support = this.supportGeometry(direction);
+    // Learned policy (guided policy search): no KKT solve; edge by alignment.
+    if (this.opts.policy && !this.opts.teacher) return this.planWithPolicy(direction, support);
     const { actuators, S } = this.sensitivity(support.face);
     const com = this.centreOfMass();
     const gradientFor = edge => S.map(col => col[0]*edge.normal[0]+col[1]*edge.normal[1]);
@@ -289,6 +291,26 @@ export class SensitivityTippingController {
     for (const item of coreActs) coreTargets[item.act.index] = coreMax*Math.max(-1, Math.min(1, item.g/gMaxCore));
 
     const margin = marginFor(chosenEdge);
+    // MPC teacher (guided policy search C-step): receding-horizon QP on the
+    // same sensitivity model, optionally pulled toward the learner's action.
+    if (this.opts.teacher) {
+      const ctx = this.policyContext(direction, geometry, com, margin);
+      const pi = this.opts.policy ? this.opts.policy.act(ctx) : null;
+      const gNorm = [...outer.map(item => item.g/gMaxOuter), ...coreActs.map(item => item.g/gMaxCore)];
+      const bounds = this.opts.teacher.bounds(sim, this.opts.relaxLimit, this.opts.coreStrokeRatio);
+      const u0 = [...sim.currentActuationOffsets.map(v => v/bounds.umax),
+        ...sim.coreRestLengths.map((_, k) => (sim.currentCoreActuationOffsets?.[k] || 0)/Math.max(bounds.cmax, 1e-9))];
+      const args = { g: gNorm, u0, lo: bounds.lo, rate: bounds.rate };
+      // Executed action: teacher pulled toward the learner; label: unregularized teacher.
+      const u = this.opts.teacher.solve({ ...args, piTarget: pi?.normalized || null });
+      const executed = this.opts.executePolicy && pi ? pi.normalized : u;
+      for (let k = 0; k < 24; k++) cableTargets[k] = executed[k]*bounds.umax;
+      for (let k = 0; k < 12; k++) coreTargets[k] = executed[24+k]*bounds.cmax;
+      if (this.opts.onSample) {
+        const label = pi && this.opts.teacher.regularized ? this.opts.teacher.solve({ ...args, piTarget: null }) : u;
+        this.opts.onSample(ctx, label, pi);
+      }
+    }
     let predictedShift = 0;
     cableTargets.forEach((u, k) => { predictedShift += g[k]*(u-sim.currentActuationOffsets[k]); });
     coreTargets.forEach((u, k) => { predictedShift += g[24+k]*(u-sim.currentCoreActuationOffsets[k]); });
@@ -296,6 +318,49 @@ export class SensitivityTippingController {
       achievable: this.achievable(g, actuators),
       activeCables: chosen.map(item => item.act.index) };
     return { geometry, cableTargets, coreTargets, margin };
+  }
+
+  policyContext(direction, geometry, com, margin) {
+    return { sim: this.sim, geometry, direction, com, margin, state: this.state,
+      elapsed: this.sim.t-this.enteredAt, relaxLimit: this.opts.relaxLimit, coreStrokeRatio: this.opts.coreStrokeRatio };
+  }
+
+  /** Command from the learned policy; edge locked per cycle by alignment. */
+  planWithPolicy(direction, support) {
+    const sim = this.sim;
+    let chosenEdge = this.cycleEdgeKey
+      ? support.edges.find(edge => edge.edge.slice().sort((a, b) => a-b).join('-') === this.cycleEdgeKey) || null
+      : null;
+    const keyOf = edge => edge.edge.slice().sort((a, b) => a-b).join('-');
+    const com = this.centreOfMass();
+    if (!chosenEdge) {
+      // Skip edges that already failed (aborted) from this support face.
+      const failed = this.failedEdges?.get(support.signature) || new Set();
+      let candidates = support.edges.filter(edge => !failed.has(keyOf(edge)));
+      if (!candidates.length) candidates = support.edges;
+      const forward = candidates.filter(edge => edge.alignment >= this.opts.minAlignment);
+      const pool = forward.length ? forward : candidates;
+      if (this.opts.policyEdgeSelection === 'feasibility') {
+        // One KKT solve per tip cycle (not per tick): pick the edge whose
+        // achievable COM shift exceeds its margin the most, as the teacher does.
+        const { actuators, S } = this.sensitivity(support.face);
+        let best = -Infinity;
+        for (const edge of pool) {
+          const g = S.map(col => col[0]*edge.normal[0]+col[1]*edge.normal[1]);
+          const margin = -((com[0]-edge.mid[0])*edge.normal[0]+(com[1]-edge.mid[1])*edge.normal[1]);
+          const score = this.achievable(g, actuators)-margin;
+          if (score > best) { best = score; chosenEdge = edge; }
+        }
+      }
+      chosenEdge = chosenEdge || pool.reduce((a, b) => (b.alignment > a.alignment ? b : a));
+      this.cycleEdgeKey = keyOf(chosenEdge);
+    }
+    const margin = -((com[0]-chosenEdge.mid[0])*chosenEdge.normal[0]+(com[1]-chosenEdge.mid[1])*chosenEdge.normal[1]);
+    const geometry = { ...support, ...chosenEdge };
+    const command = this.opts.policy.act(this.policyContext(direction, geometry, com, margin));
+    this.lastPlan = { geometry, margin, predictedShift: 0, achievable: null,
+      activeCables: command.cableTargets.map((u, k) => (Math.abs(u) > 1e-4 ? k : -1)).filter(k => k >= 0) };
+    return { geometry, cableTargets: command.cableTargets, coreTargets: command.coreTargets, margin };
   }
 
   update(centroid, velocity, omega, direction) {
@@ -323,6 +388,7 @@ export class SensitivityTippingController {
       const tipped = geometry.signature !== this.cycleSignature;
       if (tipped) {
         this.tipCount++;
+        this.failedEdges = null;
         this.enter('SGT_RELEASE');
         command = zeros();
       } else if (this.state === 'SGT_SHIFT' && planned.margin < 0) {
@@ -330,6 +396,11 @@ export class SensitivityTippingController {
       } else if ((this.state === 'SGT_SHIFT' && elapsed >= this.opts.shiftTimeout) ||
         (this.state === 'SGT_TIP' && elapsed >= this.opts.tipHoldTimeout)) {
         this.abortCount++;
+        if (this.opts.policy && !this.opts.teacher && this.cycleEdgeKey) {
+          if (!this.failedEdges) this.failedEdges = new Map();
+          if (!this.failedEdges.has(this.cycleSignature)) this.failedEdges.set(this.cycleSignature, new Set());
+          this.failedEdges.get(this.cycleSignature).add(this.cycleEdgeKey);
+        }
         this.enter('SGT_RELEASE');
         command = zeros();
       }

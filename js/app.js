@@ -630,7 +630,7 @@ class App {
       ilqr: 'iLQR', ilqr_minimax: 'MM-iLQR', ilqr_minimax_penalty: 'MM-iLQR+P',
       qp_mpc: 'MPC', qp_mpc_payload: 'MPC+P', neural: 'NN',
       riccati_lqr: 'Ric-LQR', ilqr_true: 'iLQR-T',
-      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC', mpc_gps: 'MPC+GPS'
+      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC', mpc_gps: 'MPC+GPS', guided_policy: 'GPS-policy'
     };
     return map[mode] || mode || '—';
   }

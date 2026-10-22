@@ -53,6 +53,10 @@ export const METHODS = Object.freeze({
     label: 'MPC + GPS (Kalman-fused steering + QP-MPC effort)', short: 'MPC+GPS',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'mpc_gps'; }
   },
+  guidedPolicy: {
+    label: 'MPC-guided policy search (learned policy)', short: 'GPS-policy',
+    configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; }
+  },
   legacyAssisted: {
     label: 'Legacy engine with external assists (not admissible)', short: 'Legacy+assist', reference: true,
     configure: cfg => {

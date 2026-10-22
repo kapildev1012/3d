@@ -1,0 +1,207 @@
+{
+ "evaluation": [
+  {
+   "mode": "sgt",
+   "level": 1,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 101,
+   "progress": 2.3538707873787206,
+   "crossTrack": 0.278889128496983,
+   "tips": 12,
+   "aborts": 0,
+   "controllerMs": 0.5483260324188328,
+   "wallSeconds": 55.069
+  },
+  {
+   "mode": "teacher",
+   "level": 1,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 101,
+   "progress": 2.185568275793127,
+   "crossTrack": 0.26221683550360564,
+   "tips": 11,
+   "aborts": 0,
+   "controllerMs": 0.6063539775561043,
+   "wallSeconds": 55.823
+  },
+  {
+   "mode": "policy",
+   "level": 1,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 101,
+   "progress": 2.5914316113941904,
+   "crossTrack": 0.13052300977707085,
+   "tips": 13,
+   "aborts": 0,
+   "controllerMs": 0.6921915037406102,
+   "wallSeconds": 54.823
+  },
+  {
+   "mode": "sgt",
+   "level": 1,
+   "target": [
+    6,
+    25
+   ],
+   "seed": 102,
+   "progress": 2.417880590547643,
+   "crossTrack": 0.05267972922020108,
+   "tips": 12,
+   "aborts": 0,
+   "controllerMs": 0.5753358079799111,
+   "wallSeconds": 54.017
+  },
+  {
+   "mode": "teacher",
+   "level": 1,
+   "target": [
+    6,
+    25
+   ],
+   "seed": 102,
+   "progress": 2.451371020276495,
+   "crossTrack": 0.008801727376297943,
+   "tips": 12,
+   "aborts": 0,
+   "controllerMs": 0.6377603990023621,
+   "wallSeconds": 54.072
+  },
+  {
+   "mode": "policy",
+   "level": 1,
+   "target": [
+    6,
+    25
+   ],
+   "seed": 102,
+   "progress": 1.6305848832529648,
+   "crossTrack": 0.2921538240942798,
+   "tips": 10,
+   "aborts": 1,
+   "controllerMs": 0.7262373815458663,
+   "wallSeconds": 54.37
+  },
+  {
+   "mode": "sgt",
+   "level": 3,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 103,
+   "progress": 1.9851164180703025,
+   "crossTrack": 0.028418491273720238,
+   "tips": 11,
+   "aborts": 0,
+   "controllerMs": 0.46470609226953696,
+   "wallSeconds": 54.247
+  },
+  {
+   "mode": "teacher",
+   "level": 3,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 103,
+   "progress": 2.5772340559962252,
+   "crossTrack": 0.00779300899224419,
+   "tips": 11,
+   "aborts": 0,
+   "controllerMs": 0.590654331670833,
+   "wallSeconds": 55.488
+  },
+  {
+   "mode": "policy",
+   "level": 3,
+   "target": [
+    0,
+    25
+   ],
+   "seed": 103,
+   "progress": 1.7019169117929667,
+   "crossTrack": 0.1894473998436103,
+   "tips": 10,
+   "aborts": 1,
+   "controllerMs": 0.7146183192020003,
+   "wallSeconds": 54.427
+  },
+  {
+   "mode": "sgt",
+   "level": 3,
+   "target": [
+    -6,
+    25
+   ],
+   "seed": 104,
+   "progress": 1.690482206315497,
+   "crossTrack": 0.06051107549078186,
+   "tips": 9,
+   "aborts": 1,
+   "controllerMs": 0.5458601471321889,
+   "wallSeconds": 53.902
+  },
+  {
+   "mode": "teacher",
+   "level": 3,
+   "target": [
+    -6,
+    25
+   ],
+   "seed": 104,
+   "progress": 1.8631192116773294,
+   "crossTrack": 0.10202192874273165,
+   "tips": 9,
+   "aborts": 1,
+   "controllerMs": 0.680284713216955,
+   "wallSeconds": 55.257
+  },
+  {
+   "mode": "policy",
+   "level": 3,
+   "target": [
+    -6,
+    25
+   ],
+   "seed": 104,
+   "progress": 1.6356945029908434,
+   "crossTrack": 0.08758970872610426,
+   "tips": 13,
+   "aborts": 0,
+   "controllerMs": 0.7967316408977084,
+   "wallSeconds": 54.661
+  }
+ ],
+ "summary": {
+  "sgt": {
+   "progress": 2.1118375005780408,
+   "crossTrack": 0.10512460612042154,
+   "tips": 11,
+   "aborts": 0.25,
+   "controllerMs": 0.5335570199501174
+  },
+  "teacher": {
+   "progress": 2.269323140935794,
+   "crossTrack": 0.09520837515371984,
+   "tips": 10.75,
+   "aborts": 0.25,
+   "controllerMs": 0.6287633553615636
+  },
+  "policy": {
+   "progress": 1.8899069773577415,
+   "crossTrack": 0.17492848561026633,
+   "tips": 11.5,
+   "aborts": 0.5,
+   "controllerMs": 0.7324447113465463
+  }
+ }
+}
