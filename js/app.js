@@ -250,6 +250,22 @@ class App {
     });
   }
 
+  /**
+   * Tipping-gait controllers (SGT, guided policy, cable-only MPC + GPS) need
+   * the research strokes and spool speed; the game defaults (0.12 m outer,
+   * 0.065 m payload) are too short for any cable-only tip.
+   */
+  applyTippingGaitStrokes() {
+    const mode = this.cfg.controllerMode;
+    const tipping = mode === 'sgt_tipping' || mode === 'guided_policy' || (mode === 'mpc_gps' && this.cfg.pureCableActuation);
+    if (!tipping) return;
+    Object.assign(this.cfg, { actuationDeltaL: 0.15, coreActuationDeltaL: 0.15, cableLinearVelocity: 0.20, coreCableLinearVelocity: 0.20 });
+    const slider = document.getElementById('slider-actuation');
+    if (slider) slider.value = '0.15';
+    const readout = document.getElementById('val-actuation');
+    if (readout) readout.textContent = '0.150 m';
+  }
+
   /** Switch strut/cable material (masses, inertia, series cable stiffness). */
   setMaterial(id, { rebuild = true } = {}) {
     if (!MATERIALS[id]) return;
@@ -326,6 +342,7 @@ class App {
       if (state.controller && document.querySelector(`#select-controller option[value="${CSS.escape(state.controller)}"]`)) {
         rebuild ||= this.cfg.controllerMode !== state.controller;
         this.cfg.controllerMode = state.controller;
+        this.applyTippingGaitStrokes();
       }
       if (state.mat && MATERIALS[state.mat] && state.mat !== this.cfg.material) {
         this.setMaterial(state.mat, { rebuild: false });
@@ -1054,6 +1071,7 @@ class App {
   loadExperiment(expId, { reason = 'level-switch' } = {}) {
     this.recorder?.commit(reason);
     configureLevel(this.cfg, expId);
+    this.applyTippingGaitStrokes();
     const gaitSelect = document.getElementById('select-gait-mode');
     if (gaitSelect) gaitSelect.value = this.cfg.actuationMode;
     const experimentSelect = document.getElementById('select-experiment');
@@ -1220,6 +1238,7 @@ class App {
     on('select-controller', 'change', event => {
       this.recorder.commit('controller-change');
       this.cfg.controllerMode = event.target.value;
+      this.applyTippingGaitStrokes();
       this.simB.controlDiagnostics.mode = event.target.value;
       this.resetRovers('controller-change');
       this.syncUrl();
