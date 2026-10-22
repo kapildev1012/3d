@@ -1,0 +1,305 @@
+{
+ "conditions": [
+  {
+   "id": "L1-s1",
+   "scenario": "nominal",
+   "level": 1,
+   "seed": 1
+  },
+  {
+   "id": "L1-s2",
+   "scenario": "nominal",
+   "level": 1,
+   "seed": 2
+  },
+  {
+   "id": "L1-s3",
+   "scenario": "nominal",
+   "level": 1,
+   "seed": 3
+  },
+  {
+   "id": "L3-s1",
+   "scenario": "nominal",
+   "level": 3,
+   "seed": 1
+  },
+  {
+   "id": "L3-s2",
+   "scenario": "nominal",
+   "level": 3,
+   "seed": 2
+  },
+  {
+   "id": "push",
+   "scenario": "push",
+   "level": 1,
+   "seed": 1
+  },
+  {
+   "id": "impulse",
+   "scenario": "impulse",
+   "level": 1,
+   "seed": 1
+  },
+  {
+   "id": "payload+30%",
+   "scenario": "payload",
+   "level": 1,
+   "seed": 1
+  },
+  {
+   "id": "delay 100ms",
+   "scenario": "delay",
+   "level": 1,
+   "seed": 1
+  },
+  {
+   "id": "k-20%",
+   "scenario": "stiffness",
+   "level": 1,
+   "seed": 1
+  }
+ ],
+ "seconds": 20,
+ "summary": {
+  "SGT": {
+   "progress": {
+    "name": "Progress (m)",
+    "off": {
+     "mean": 1.4863319311861702,
+     "std": 0.3905484060930917
+    },
+    "on": {
+     "mean": 2.2017594788910375,
+     "std": 0.6368230594534119
+    },
+    "improvedIn": 8,
+    "of": 10
+   },
+   "slackPct": {
+    "name": "Payload-cable slack time (%)",
+    "off": {
+     "mean": 35.129007928155474,
+     "std": 2.9484450642256332
+    },
+    "on": {
+     "mean": 2.729162281624921,
+     "std": 0.6311302432422317
+    },
+    "improvedIn": 10,
+    "of": 10
+   },
+   "meanCoreTension": {
+    "name": "Mean payload-cable tension (N)",
+    "off": {
+     "mean": 6.172582257455686,
+     "std": 0.498765249179953
+    },
+    "on": {
+     "mean": 17.963305111038153,
+     "std": 1.0360328002849977
+    },
+    "improvedIn": 10,
+    "of": 10
+   },
+   "minClearance": {
+    "name": "Min payload–rod clearance (m)",
+    "off": {
+     "mean": 0.10231304291603834,
+     "std": 0.018319203729159947
+    },
+    "on": {
+     "mean": 0.0901540613515284,
+     "std": 0.03455674289343635
+    },
+    "improvedIn": 5,
+    "of": 10
+   },
+   "rattleMm": {
+    "name": "Payload rattle RMS (mm)",
+    "off": {
+     "mean": 18.571180479598873,
+     "std": 1.003957453861545
+    },
+    "on": {
+     "mean": 14.991804893451533,
+     "std": 2.5189726671902215
+    },
+    "improvedIn": 9,
+    "of": 10
+   },
+   "payloadAccelP99g": {
+    "name": "Payload accel. 99th pct (g)",
+    "off": {
+     "mean": 2.5025691461884785,
+     "std": 1.0787110067909065
+    },
+    "on": {
+     "mean": 3.177077955878074,
+     "std": 1.6983155852961525
+    },
+    "improvedIn": 4,
+    "of": 10
+   },
+   "maxOuterTension": {
+    "name": "Max outer-cable tension (N)",
+    "off": {
+     "mean": 137.0445862456529,
+     "std": 80.78402025936406
+    },
+    "on": {
+     "mean": 179.3665994034628,
+     "std": 79.18921304378463
+    },
+    "improvedIn": 3,
+    "of": 10
+   },
+   "aborts": {
+    "name": "Aborted tip cycles",
+    "off": {
+     "mean": 1.1,
+     "std": 1.1005049346146119
+    },
+    "on": {
+     "mean": 0,
+     "std": 0
+    },
+    "improvedIn": 6,
+    "of": 10
+   },
+   "controllerMs": {
+    "name": "Controller time (ms/tick)",
+    "off": {
+     "mean": 0.6360744586034829,
+     "std": 0.11381175144753823
+    },
+    "on": {
+     "mean": 3.597122287531197,
+     "std": 0.2131098962781739
+    },
+    "improvedIn": 0,
+    "of": 10
+   }
+  },
+  "Learned policy": {
+   "progress": {
+    "name": "Progress (m)",
+    "off": {
+     "mean": 1.3151817768353014,
+     "std": 0.6439031945715461
+    },
+    "on": {
+     "mean": 1.2918154032557791,
+     "std": 0.5393612520279312
+    },
+    "improvedIn": 4,
+    "of": 10
+   },
+   "slackPct": {
+    "name": "Payload-cable slack time (%)",
+    "off": {
+     "mean": 33.62914824949134,
+     "std": 2.4021488348535476
+    },
+    "on": {
+     "mean": 1.6223777450361325,
+     "std": 0.5756120327510009
+    },
+    "improvedIn": 10,
+    "of": 10
+   },
+   "meanCoreTension": {
+    "name": "Mean payload-cable tension (N)",
+    "off": {
+     "mean": 6.915056342053125,
+     "std": 0.5769161054670543
+    },
+    "on": {
+     "mean": 17.511840695984915,
+     "std": 0.7563558791282493
+    },
+    "improvedIn": 10,
+    "of": 10
+   },
+   "minClearance": {
+    "name": "Min payload–rod clearance (m)",
+    "off": {
+     "mean": 0.10544357727548097,
+     "std": 0.013760915913258807
+    },
+    "on": {
+     "mean": 0.10062470532383345,
+     "std": 0.03287040766958329
+    },
+    "improvedIn": 4,
+    "of": 10
+   },
+   "rattleMm": {
+    "name": "Payload rattle RMS (mm)",
+    "off": {
+     "mean": 22.379074985227838,
+     "std": 0.9780959125171363
+    },
+    "on": {
+     "mean": 27.45368966641983,
+     "std": 4.587098443568795
+    },
+    "improvedIn": 3,
+    "of": 10
+   },
+   "payloadAccelP99g": {
+    "name": "Payload accel. 99th pct (g)",
+    "off": {
+     "mean": 2.036265665723552,
+     "std": 1.121030360763622
+    },
+    "on": {
+     "mean": 1.711509819407023,
+     "std": 0.6644897530121303
+    },
+    "improvedIn": 5,
+    "of": 10
+   },
+   "maxOuterTension": {
+    "name": "Max outer-cable tension (N)",
+    "off": {
+     "mean": 121.79105792229419,
+     "std": 64.56440846828899
+    },
+    "on": {
+     "mean": 105.06870429400188,
+     "std": 51.50581191288495
+    },
+    "improvedIn": 7,
+    "of": 10
+   },
+   "aborts": {
+    "name": "Aborted tip cycles",
+    "off": {
+     "mean": 1.5,
+     "std": 1.35400640077266
+    },
+    "on": {
+     "mean": 1.7,
+     "std": 1.4181364924121764
+    },
+    "improvedIn": 3,
+    "of": 10
+   },
+   "controllerMs": {
+    "name": "Controller time (ms/tick)",
+    "off": {
+     "mean": 0.7854805291769963,
+     "std": 0.11863607263004498
+    },
+    "on": {
+     "mean": 3.639794639152125,
+     "std": 0.2280364316189066
+    },
+    "improvedIn": 0,
+    "of": 10
+   }
+  }
+ }
+}

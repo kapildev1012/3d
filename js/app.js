@@ -245,6 +245,7 @@ class App {
       act: this.cfg.pureCableActuation ? 'pure' : 'assisted',
       g: Number(Math.abs(this.cfg.gravity?.[2] ?? 9.81).toFixed(3)),
       mat: this.cfg.material || DEFAULT_APP_MATERIAL,
+      shield: this.cfg.tensionShield ? 1 : null,
       speed: this.simSpeed,
       cam: document.getElementById('select-camera')?.value || 'chase'
     });
@@ -348,6 +349,12 @@ class App {
         this.setMaterial(state.mat, { rebuild: false });
         rebuild = false;
         this.loadExperiment(this.cfg.experimentId, { reason: 'url' });
+      }
+      if (state.shield === '1' && !this.cfg.tensionShield) {
+        this.cfg.tensionShield = true;
+        rebuild = true;
+        const button = document.getElementById('btn-toggle-shield');
+        if (button) { button.textContent = 'TENSION SHIELD: ON'; button.setAttribute('aria-pressed', 'true'); button.classList.add('is-on'); }
       }
       if (rebuild) { this.simA.reset(); this.simB.reset(); }
       if (state.gait && document.querySelector(`#select-gait-mode option[value="${CSS.escape(state.gait)}"]`)) {
@@ -740,6 +747,10 @@ class App {
     setText('drive-completed-rolls', String(diagB.completedRolls || 0));
     setText('drive-active-cables', `${diagB.activeCableCount || 0}C / ${this.rover.outerStrings.length} · ${diagB.activeRodCount || 0}R / ${this.rover.bars.length}`);
     setText('drive-relaxation', `${Math.round((diagB.relaxationFraction || 0)*100)}%`);
+    const shield = this.simB?.sgt?.shieldInfo;
+    setText('drive-shield', !this.cfg.tensionShield ? 'off'
+      : shield ? `${shield.active} active · min payload T ${shield.minCoreTension.toFixed(1)} N · Δu ${(1000*shield.correction).toFixed(1)} mm${shield.shiftDropped ? ' · shift relaxed' : ''}`
+        : 'on (tipping-gait controllers)');
     const gps = this.simB?.controlDiagnostics?.gps;
     setText('drive-gps', gps
       ? `est. err ${gps.error.toFixed(2)} m · σ ${gps.sigma.toFixed(2)} m · e ${gps.crossTrack.toFixed(2)} m · ${gps.fixes} fixes`
@@ -1610,6 +1621,14 @@ class App {
     on('slider-incline', 'change', () => {
       this.terrain.generateSurface();
       this.rebuildScene();
+    });
+    on('btn-toggle-shield', 'click', event => {
+      this.cfg.tensionShield = !this.cfg.tensionShield;
+      event.currentTarget.textContent = `TENSION SHIELD: ${this.cfg.tensionShield ? 'ON' : 'OFF'}`;
+      event.currentTarget.setAttribute('aria-pressed', String(this.cfg.tensionShield));
+      event.currentTarget.classList.toggle('is-on', this.cfg.tensionShield);
+      this.recorder.commit('parameter-change');
+      this.resetRovers('parameter-change');
     });
     on('btn-toggle-relaxation', 'click', event => {
       this.cfg.stringRelaxation = !this.cfg.stringRelaxation;

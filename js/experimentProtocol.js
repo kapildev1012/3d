@@ -57,6 +57,14 @@ export const METHODS = Object.freeze({
     label: 'MPC-guided policy search (learned policy)', short: 'GPS-policy',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; }
   },
+  sgtShield: {
+    label: 'SGT + tension-certified safety filter', short: 'SGT+shield',
+    configure: cfg => { cfg.applyResearchProfile(); cfg.tensionShield = true; }
+  },
+  policyShield: {
+    label: 'Learned policy + tension-certified safety filter', short: 'Policy+shield',
+    configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; cfg.tensionShield = true; }
+  },
   legacyAssisted: {
     label: 'Legacy engine with external assists (not admissible)', short: 'Legacy+assist', reference: true,
     configure: cfg => {

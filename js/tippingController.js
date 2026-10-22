@@ -1,3 +1,4 @@
+import { shieldCommand } from './tensionShield.js?v=20261021-ws1';
 /**
  * TIPPINGCONTROLLER.JS - Sensitivity-Gradient Tipping (SGT) gait
  *
@@ -214,6 +215,7 @@ export class SensitivityTippingController {
     const masses = new Float64Array(n).fill(sim.dynamicNodeMass);
     masses[core] = cfg.coreMass;
     const totalMass = masses.reduce((s, m) => s+m, 0);
+    const displacements = [];
     const S = actuators.map(act => {
       const rhs = new Float64Array(dim);
       if (act.gain > 0) {
@@ -223,13 +225,14 @@ export class SensitivityTippingController {
         }
       }
       const x = luSolve(lu, rhs);
+      displacements.push(x.subarray ? x.subarray(0, nq) : x.slice(0, nq));
       const com = [0, 0, 0];
       for (let node = 0; node < n; node++) {
         for (let a = 0; a < 3; a++) com[a] += masses[node]*x[3*node+a];
       }
       return com.map(value => value/totalMass);
     });
-    return { actuators, S };
+    return { actuators, S, displacements };
   }
 
   /** Achievable COM shift along n for a gradient g under the box limits. */
@@ -407,7 +410,28 @@ export class SensitivityTippingController {
     } else if (this.state === 'SGT_RELEASE') {
       if (elapsed >= this.opts.releaseTime) this.enter('SGT_SETTLE');
     }
+    if (this.opts.shield) command = this.applyShield(command, direction);
     return { ...command, geometry, state: this.state };
+  }
+
+  /** Tension-certified safety filter (tensionShield.js) on the final command, in every state. */
+  applyShield(command, direction) {
+    const sim = this.sim, cfg = sim.cfg;
+    const face = this.supportGeometry(direction).face;
+    const sens = this.sensitivity(face);
+    // COM-shift gradient along the locked tipping edge (only while shifting/tipping).
+    const normal = this.lastPlan?.geometry?.normal;
+    if (normal && (this.state === 'SGT_SHIFT' || this.state === 'SGT_TIP')) {
+      sens.shiftGradient = sens.S.map(col => col[0]*normal[0]+col[1]*normal[1]);
+    }
+    const umax = cfg.actuationDeltaL, cmax = cfg.coreActuationDeltaL*this.opts.coreStrokeRatio;
+    const bounds = {
+      lo: [...new Array(24).fill(-this.opts.relaxLimit*umax), ...new Array(12).fill(-cmax)],
+      hi: [...new Array(24).fill(umax), ...new Array(12).fill(cmax)]
+    };
+    const result = shieldCommand(sim, sens, command, bounds, typeof this.opts.shield === 'object' ? this.opts.shield : {});
+    this.shieldInfo = result.info;
+    return { ...command, cableTargets: result.cableTargets, coreTargets: result.coreTargets };
   }
 }
 

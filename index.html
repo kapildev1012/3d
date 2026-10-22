@@ -258,6 +258,7 @@
       <section data-tab-panel="diag" hidden class="panel-section">
         <h3 class="sec-title">Gait &amp; controller diagnostics
           <button type="button" id="btn-toggle-relaxation" class="btn btn-xs btn-toggle" aria-pressed="false">RELAXATION: OFF</button>
+          <button type="button" id="btn-toggle-shield" class="btn btn-xs btn-toggle" aria-pressed="false" title="Tension-certified safety filter: keeps payload cables taut, outer cables under load limit and the payload clear of the rods (tipping-gait controllers)">TENSION SHIELD: OFF</button>
         </h3>
         <div class="rate-strip">
           <div><span>Physics</span><b class="num">500 Hz</b></div>
@@ -282,6 +283,7 @@
           <dt>Active C / R</dt><dd id="drive-active-cables" class="num">—</dd>
           <dt>Relaxed cables</dt><dd id="drive-relaxation" class="num">0%</dd>
           <dt>GPS / Kalman</dt><dd id="drive-gps" class="num">off (select MPC + GPS)</dd>
+          <dt>Tension shield</dt><dd id="drive-shield" class="num">off</dd>
         </dl>
       </section>
 
@@ -604,6 +606,8 @@
         <label class="check"><input type="checkbox" name="bench-method" value="mpc"> QP-MPC effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="mpcGps"> MPC + GPS</label>
         <label class="check"><input type="checkbox" name="bench-method" value="guidedPolicy"> Guided policy (MPC-GPS)</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="sgtShield"> SGT + tension shield</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="policyShield"> Policy + tension shield</label>
         <label class="check"><input type="checkbox" name="bench-method" value="legacyAssisted"> Legacy + assists †</label>
       </fieldset>
       <div class="form-grid exp-grid">

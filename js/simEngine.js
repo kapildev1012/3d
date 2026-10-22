@@ -2495,6 +2495,8 @@ export class Simulation {
             options.executePolicy = Boolean(gp.executePolicy);
           }
         }
+        // Tension-certified safety filter (tensionShield.js) on any tipping controller.
+        if (cfg.tensionShield) options.shield = cfg.tensionShield === true ? {} : cfg.tensionShield;
         this.sgt = new SensitivityTippingController(this, options);
       }
       const command = this.sgt.update(centroid, velocity, omega, desiredDirection);

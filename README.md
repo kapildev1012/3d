@@ -109,6 +109,7 @@ In the app, press **Research preset** (or choose Physics = *Lagrangian DAE* and 
 | `npm run experiments` | full protocol: 6 methods, 10 scenarios, 7 ablations, 3 terrains (114 runs, resumable, `results/paper/runs/`) |
 | `npm run paper:data` | `results/paper/tables.tex`, `numbers.tex`, figures (PDF/SVG/600-dpi PNG) |
 | `node tools/train_guided_policy.mjs` | MPC-guided policy search training + held-out evaluation |
+| `node tools/run_shield_study.mjs` | Tension-shield study, {SGT, policy} × {off, on} × 10 conditions |
 | `npm run paper:pdf` | builds `paper/main.pdf` (needs LaTeX; IEEEtran is bundled) |
 
 The *Comparative benchmark* panel runs the same protocol in the browser and has **Copy LaTeX benchmark table**. Every figure window has **Export for IEEE** (SVG, PDF, 600-dpi PNG at 3.5 in or 7.16 in).
@@ -136,6 +137,33 @@ Shipped policy, trained for 8 iterations (114k labelled actuator samples) and ev
 | learned policy | 1.89 m | 11.5 | 0.50 | 0.73 ms |
 
 The policy reaches 90 % of SGT's progress without solving the KKT model every tick. It still uses one sensitivity solve per tip cycle to choose a feasible edge (`cfg.guidedPolicy.edgeSelection = 'alignment'` drops that, at a cost in progress). It is not faster than SGT on this small structure.
+
+## Tension shield (suspension-integrity safety filter)
+
+**Finding.** While the shell rolls, gravity and the outer-cable actuation compress it (the centroid drops about 15 %). The node-to-payload distances shrink, and the 12 payload suspension cables lose their pretension. Without a filter, payload cables are slack about 35 % of the time, and in every sample at least one is slack. The "suspended" payload is loose in the cage.
+
+**Filter** (`js/tensionShield.js`, *Gait → TENSION SHIELD*, URL `?shield=1`, `cfg.tensionShield = true`). Any tipping controller (SGT, the MPC teacher or the learned policy) proposes 36 rest-length offsets. The filter returns the closest command (weighted ‖u − u_nom‖, with outer cables weighted 10× so it corrects mainly with the payload cables) that satisfies discrete-time control-barrier conditions h(u) ≥ (1 − γ)·h(now) for:
+- payload-cable tension ≥ 10 N;
+- outer-cable tension ≤ 150 N;
+- payload-to-rod clearance ≥ 0.08 m;
+- the nominal command's predicted COM shift along the tipping edge (kept, so tipping effort is re-routed rather than cancelled).
+
+The constraints are predicted with the same pinned quasi-static KKT sensitivities dq/du that SGT already factorizes, so no new model is added. The QP has 36 variables and is solved by FISTA on the dual, with the box exact in the primal.
+
+**Study** (`node tools/run_shield_study.mjs` → `results/shield_study/`; 10 conditions = 3 seeds on Level 1, 2 on Level 3, push, impulse, payload +30 %, 100 ms delay, cable stiffness −20 %; 20 s cable-only runs):
+
+| | SGT off → on | better in | Learned policy off → on | better in |
+| --- | --- | --- | --- | --- |
+| Progress | 1.49 → 2.20 m | 8/10 | 1.32 → 1.29 m | 4/10 |
+| Payload-cable slack time | 35.1 → 2.7 % | 10/10 | 33.6 → 1.6 % | 10/10 |
+| Mean payload-cable tension | 6.2 → 18.0 N | 10/10 | 6.9 → 17.5 N | 10/10 |
+| Aborted tip cycles | 1.1 → 0.0 | 6/10 | 1.5 → 1.7 | 3/10 |
+| Payload rattle RMS | 18.6 → 15.0 mm | 9/10 | 22.4 → 27.5 mm | 3/10 |
+| Payload accel. 99th pct | 2.5 → 3.2 g | 4/10 | 2.0 → 1.7 g | 5/10 |
+| Controller time | 0.64 → 3.6 ms | | 0.79 → 3.6 ms | |
+
+- **What holds:** the suspension stays taut in every condition, for both controllers. With SGT, keeping the payload cables taut makes tipping more effective: it goes 48 % further and never aborts.
+- **What does not:** the clearance and outer-load barriers hold only on the quasi-static prediction. In 3 of 20 filtered runs the payload came within 0.08 m of a rod, and peak outer tension exceeded 150 N during tumbles and impacts. Peak payload acceleration did not improve for SGT. These are dynamic events, and covering them needs a second-order (inertial) barrier.
 
 ## Materials and structural analysis (TsgFEM)
 
