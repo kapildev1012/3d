@@ -34,6 +34,27 @@ function bandOf(runs, field) {
   return { mean, lower, upper };
 }
 
+/**
+ * Yield until the browser has painted (falls back to a timer when the tab is
+ * in the background). A bare setTimeout(0) between simulation chunks starves
+ * requestAnimationFrame, so status text and charts would never be redrawn.
+ */
+function nextPaint() {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(finish, 0));
+    setTimeout(finish, 100);
+  });
+}
+
+/** Size a chart to its container now (charts created inside a hidden tab start at 0×0). */
+function fitChart(chart) {
+  const box = chart?.canvas?.parentElement?.getBoundingClientRect();
+  if (!box || box.width < 2 || box.height < 2) return;
+  if (Math.abs(chart.width-box.width) > 1 || Math.abs(chart.height-box.height) > 1 || chart.width === 0) chart.resize();
+}
+
 export class BenchmarkPanel {
   constructor(Chart, registerCharts) {
     this.Chart = Chart;
@@ -61,6 +82,33 @@ export class BenchmarkPanel {
       'bench-error': make('chart-bench-error', 'Cross-track error |e(t)| (m)'),
       'bench-effort': make('chart-bench-effort', 'Actuation ‖u(t)‖ (m)')
     };
+    // Empty-state hint over each plot until the first run finishes.
+    for (const chart of Object.values(this.charts)) {
+      const axes = chart?.canvas?.parentElement;
+      if (!axes) continue;
+      axes.style.position ||= 'relative';
+      const hint = document.createElement('div');
+      hint.className = 'bench-empty-hint';
+      hint.textContent = 'No benchmark runs yet: press “Run benchmark” above (mean ± 1σ over the selected seeds).';
+      Object.assign(hint.style, {
+        position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        textAlign: 'center', padding: '0 24px', font: '12px var(--font-ui, system-ui)', color: 'var(--text-dim, #8b93a1)', pointerEvents: 'none'
+      });
+      axes.appendChild(hint);
+    }
+    // Re-fit whenever the panel becomes visible or changes size.
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(() => this.fitCharts());
+      for (const chart of Object.values(this.charts)) if (chart?.canvas?.parentElement) observer.observe(chart.canvas.parentElement);
+    }
+  }
+
+  fitCharts() {
+    for (const chart of Object.values(this.charts || {})) {
+      if (!chart) continue;
+      fitChart(chart);
+      if (chart.width > 0) chart.update('none');
+    }
   }
 
   selection() {
@@ -97,7 +145,7 @@ export class BenchmarkPanel {
             duration,
             onChunk: async fraction => {
               this.setStatus(`Run ${index}/${total} · ${METHODS[method].short} · seed ${seed} · ${(100*fraction).toFixed(0)} %`);
-              await new Promise(resolve => setTimeout(resolve, 0));
+              await nextPaint();
               if (this.stopRequested) throw new Error('stopped');
             }
           });
@@ -148,7 +196,10 @@ export class BenchmarkPanel {
       const chart = this.charts[key];
       if (!chart) return;
       chart.data.datasets = bandDatasets(field);
+      fitChart(chart);
       chart.update('none');
+      const hint = chart.canvas.parentElement?.querySelector('.bench-empty-hint');
+      if (hint) hint.style.display = methodKeys.length > 0 ? 'none' : 'flex';
     };
     // |e| for the error figure
     for (const run of this.results) run.series.absE = run.series.absE || run.series.e.map(Math.abs);
