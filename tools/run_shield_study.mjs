@@ -31,7 +31,7 @@ const conditions = [
   { id: 'delay 100ms', scenario: 'delay', level: 1, seed: 1 },
   { id: 'k-20%', scenario: 'stiffness', level: 1, seed: 1 }
 ];
-const controllers = [['sgt_tipping', 'SGT'], ['guided_policy', 'Learned policy']];
+const controllers = [['sgt_tipping', 'SGT'], ['guided_policy', 'MPC + GPS (learned policy)']];
 const jobs = [];
 for (const c of conditions) for (const [mode] of controllers) for (const shield of ['off', 'on']) jobs.push({ ...c, mode, shield });
 

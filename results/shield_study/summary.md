@@ -16,7 +16,7 @@
 | Aborted tip cycles | 1.100 ± 1.101 | 0.000 ± 0.000 | 6/10 |
 | Controller time (ms/tick) | 0.636 ± 0.114 | 3.597 ± 0.213 | 0/10 |
 
-## Learned policy
+## MPC + GPS (learned policy)
 
 | Metric | Filter off | Filter on | Better in |
 |---|---|---|---|

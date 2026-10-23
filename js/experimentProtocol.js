@@ -49,12 +49,12 @@ export const METHODS = Object.freeze({
     label: 'QP-MPC effort + support face', short: 'QP-MPC',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'qp_mpc_proj'; }
   },
-  mpcGps: {
-    label: 'MPC + GPS (Kalman-fused steering + QP-MPC effort)', short: 'MPC+GPS',
-    configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'mpc_gps'; }
+  mpcGnss: {
+    label: 'MPC + GNSS (satellite positioning, Kalman-fused steering)', short: 'MPC+GNSS',
+    configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'mpc_gnss'; }
   },
   guidedPolicy: {
-    label: 'MPC-guided policy search (learned policy)', short: 'GPS-policy',
+    label: 'MPC + GPS: MPC-guided policy search (learned policy)', short: 'MPC+GPS',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; }
   },
   sgtShield: {
@@ -62,7 +62,7 @@ export const METHODS = Object.freeze({
     configure: cfg => { cfg.applyResearchProfile(); cfg.tensionShield = true; }
   },
   policyShield: {
-    label: 'Learned policy + tension-certified safety filter', short: 'Policy+shield',
+    label: 'MPC + GPS (guided policy search) + tension shield', short: 'MPC+GPS+shield',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; cfg.tensionShield = true; }
   },
   legacyAssisted: {

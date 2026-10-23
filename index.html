@@ -94,8 +94,8 @@
           <option value="ilqr_true">iLQR · nonlinear rollout</option>
           <option value="ilqr_minimax_true">Robust iLQR · adversarial</option>
           <option value="qp_mpc_proj">QP-MPC · projected gradient</option>
-          <option value="mpc_gps">MPC + GPS · Kalman-fused path tracking</option>
-          <option value="guided_policy">MPC-guided policy search · learned policy</option>
+          <option value="mpc_gnss">MPC + GNSS · Kalman-fused path tracking</option>
+          <option value="guided_policy">MPC + GPS · guided policy search (learned policy)</option>
         </optgroup>
         <optgroup label="Adaptive profiles">
           <option value="lqr">LQR rolling direction</option>
@@ -282,7 +282,7 @@
           <dt>Completed rolls</dt><dd id="drive-completed-rolls" class="num">0</dd>
           <dt>Active C / R</dt><dd id="drive-active-cables" class="num">—</dd>
           <dt>Relaxed cables</dt><dd id="drive-relaxation" class="num">0%</dd>
-          <dt>GPS / Kalman</dt><dd id="drive-gps" class="num">off (select MPC + GPS)</dd>
+          <dt>GNSS / Kalman</dt><dd id="drive-gnss" class="num">off (select MPC + GNSS)</dd>
           <dt>Tension shield</dt><dd id="drive-shield" class="num">off</dd>
         </dl>
       </section>
@@ -604,10 +604,10 @@
         <label class="check"><input type="checkbox" name="bench-method" value="lqr"> Riccati-LQR effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="ilqr"> iLQR effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="mpc"> QP-MPC effort</label>
-        <label class="check"><input type="checkbox" name="bench-method" value="mpcGps"> MPC + GPS</label>
-        <label class="check"><input type="checkbox" name="bench-method" value="guidedPolicy"> Guided policy (MPC-GPS)</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="mpcGnss"> MPC + GNSS (satellite positioning)</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="guidedPolicy"> MPC + GPS (guided policy search)</label>
         <label class="check"><input type="checkbox" name="bench-method" value="sgtShield"> SGT + tension shield</label>
-        <label class="check"><input type="checkbox" name="bench-method" value="policyShield"> Policy + tension shield</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="policyShield"> MPC + GPS + tension shield</label>
         <label class="check"><input type="checkbox" name="bench-method" value="legacyAssisted"> Legacy + assists †</label>
       </fieldset>
       <div class="form-grid exp-grid">

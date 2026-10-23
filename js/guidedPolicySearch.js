@@ -1,5 +1,5 @@
 /**
- * GUIDEDPOLICYSEARCH.JS - MPC-guided policy search for the six-bar rover
+ * GUIDEDPOLICYSEARCH.JS - "MPC + GPS": MPC-guided policy search for the six-bar rover
  *
  * Guided Policy Search (Levine & Koltun 2013; MPC-guided variant: Zhang,
  * Kahn, Levine & Abbeel, "Learning deep control policies for autonomous

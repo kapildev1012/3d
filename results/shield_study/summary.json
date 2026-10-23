@@ -104,7 +104,7 @@
     "of": 10
    },
    "minClearance": {
-    "name": "Min payload–rod clearance (m)",
+    "name": "Min payload\u2013rod clearance (m)",
     "off": {
      "mean": 0.10231304291603834,
      "std": 0.018319203729159947
@@ -182,7 +182,7 @@
     "of": 10
    }
   },
-  "Learned policy": {
+  "MPC + GPS (learned policy)": {
    "progress": {
     "name": "Progress (m)",
     "off": {
@@ -223,7 +223,7 @@
     "of": 10
    },
    "minClearance": {
-    "name": "Min payload–rod clearance (m)",
+    "name": "Min payload\u2013rod clearance (m)",
     "off": {
      "mean": 0.10544357727548097,
      "std": 0.013760915913258807

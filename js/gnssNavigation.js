@@ -1,8 +1,10 @@
 /**
- * GPSNAVIGATION.JS - MPC + GPS waypoint navigation for the rolling rover
+ * GNSSNAVIGATION.JS - MPC + GNSS (satellite positioning) navigation for the
+ * rolling rover. Not to be confused with "MPC + GPS" in this project, which
+ * is MPC-guided policy search (guidedPolicySearch.js).
  *
  * The other controllers steer from the simulator's true centre of mass. The
- * MPC + GPS controller only sees what a GNSS receiver would report:
+ * MPC + GNSS controller only sees what a GNSS receiver would report:
  *
  *  1. GpsReceiver: fixes at `rate` Hz with horizontal noise σ (white Gaussian
  *     + slowly drifting bias, Gauss–Markov), a fixed latency and random
@@ -245,7 +247,7 @@ export function solveSteeringMpc(ctx, options = {}) {
  * step() is called once per control tick with the true centroid (fed only to
  * the receiver) and returns the estimate and the commanded rolling direction.
  */
-export class GpsMpcNavigator {
+export class GnssMpcNavigator {
   constructor({ gps = {}, mpc = {}, seed = 1, start = null, goal = [0, 25] } = {}) {
     this.receiver = new GpsReceiver(gps, seed);
     this.filter = new GpsKalmanFilter(gps);

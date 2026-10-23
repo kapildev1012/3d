@@ -1,10 +1,10 @@
 /**
- * MPC + GPS controller: receiver model, Kalman filter, steering MPC and a
+ * MPC + GNSS (satellite positioning) controller: receiver model, Kalman filter, steering MPC and a
  * closed-loop run on the research (DAE, cable-only) profile.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GpsReceiver, GpsKalmanFilter, solveSteeringMpc, GpsMpcNavigator, GPS_MPC_DEFAULTS } from '../js/gpsNavigation.js';
+import { GpsReceiver, GpsKalmanFilter, solveSteeringMpc, GnssMpcNavigator, GPS_MPC_DEFAULTS } from '../js/gnssNavigation.js';
 import { solveAdvancedController, ADVANCED_MODES } from '../js/advancedControllers.js';
 import { runExperiment, METHODS } from '../js/experimentProtocol.js';
 
@@ -63,7 +63,7 @@ test('steering MPC respects |ω| ≤ ωmax and turns back toward the path', () =
 });
 
 test('navigator on a kinematic rover converges onto the start→goal line from a 2 m offset', () => {
-  const nav = new GpsMpcNavigator({ seed: 5, start: [0, 0], goal: [0, 40] });
+  const nav = new GnssMpcNavigator({ seed: 5, start: [0, 0], goal: [0, 40] });
   let p = [2, 0];
   for (let k = 0; k < 1200; k++) {            // 60 s, rover rolls 0.5 m/s in the commanded direction
     const out = nav.step(0.05*k, [p[0], p[1], 0.5], { forwardSpeeds: [0.5] });
@@ -74,17 +74,17 @@ test('navigator on a kinematic rover converges onto the start→goal line from a
   assert.ok(p[1] > 25);
 });
 
-test('mpc_gps is a registered advanced mode and a benchmark method', () => {
-  assert.ok(ADVANCED_MODES.has('mpc_gps'));
-  assert.ok(METHODS.mpcGps);
-  const s = solveAdvancedController('mpc_gps', { state0: [0.1, 0], referenceSpeed: 0.5, horizon: 10,
+test('mpc_gnss is a registered advanced mode and a benchmark method', () => {
+  assert.ok(ADVANCED_MODES.has('mpc_gnss'));
+  assert.ok(METHODS.mpcGnss);
+  const s = solveAdvancedController('mpc_gnss', { state0: [0.1, 0], referenceSpeed: 0.5, horizon: 10,
     weights: { qv: 6, qh: 4, r: 1, rd: 0.5, qvT: 10, qhT: 6 },
     params: { thrust: 1.35, drag: 0.95, gradeLoss: 0.85, heightRelax: 2.2, rollCoupling: 0.1, dtH: 0.05 } });
   assert.ok(s.command >= -1 && s.command <= 1);
 });
 
-test('closed loop (DAE, cable-only): MPC + GPS rolls forward with a bounded estimate error', { timeout: 300000 }, async () => {
-  const result = await runExperiment({ method: 'mpcGps', scenario: 'nominal', seed: 1, level: 1 }, { duration: 12 });
+test('closed loop (DAE, cable-only): MPC + GNSS rolls forward with a bounded estimate error', { timeout: 300000 }, async () => {
+  const result = await runExperiment({ method: 'mpcGnss', scenario: 'nominal', seed: 1, level: 1 }, { duration: 12 });
   assert.ok(result.metrics.progress > 0.3 || result.series.y.at(-1) > 0.3, `progress ${result.series.y.at(-1)}`);
   assert.equal(result.metrics.assistShare ?? 0, 0);
 });

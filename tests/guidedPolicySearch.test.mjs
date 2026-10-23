@@ -1,5 +1,5 @@
 /**
- * MPC-guided policy search: teacher QP, MLP regression, policy wiring and a
+ * "MPC + GPS" (MPC-guided policy search): teacher QP, MLP regression, policy wiring and a
  * closed-loop check of the shipped (trained) policy.
  */
 import test from 'node:test';

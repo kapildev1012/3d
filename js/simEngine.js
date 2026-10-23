@@ -4,7 +4,7 @@ import {
   solveAdvancedController
 } from './advancedControllers.js?v=20261021-ws1';
 import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
-import { GpsMpcNavigator } from './gpsNavigation.js?v=20261021-ws1';
+import { GnssMpcNavigator } from './gnssNavigation.js?v=20261021-ws1';
 import { GuidedPolicy, solveTeacherQp, actuatorBounds } from './guidedPolicySearch.js?v=20261021-ws1';
 import { GUIDED_POLICY_WEIGHTS } from './guidedPolicyWeights.js?v=20261021-ws1';
 
@@ -2450,13 +2450,13 @@ export class Simulation {
     });
     let desiredDirection = this.desiredDirectionForMode(centroid, obstacle, velocity, this.learningCommand);
 
-    // MPC + GPS: steer from a Kalman-filtered GNSS estimate instead of the
+    // MPC + GNSS: steer from a Kalman-filtered satellite-positioning estimate instead of the
     // true centre of mass; the steering MPC sets the rolling direction and
     // the QP-MPC below sets the cable effort from the estimated speed.
     let controlVelocity = velocity;
-    if (this.modelType === 'adaptive' && cfg.controllerMode === 'mpc_gps' && cfg.actuationMode !== 'none') {
+    if (this.modelType === 'adaptive' && cfg.controllerMode === 'mpc_gnss' && cfg.actuationMode !== 'none') {
       if (!this.gpsNav) {
-        this.gpsNav = new GpsMpcNavigator({
+        this.gpsNav = new GnssMpcNavigator({
           gps: cfg.gps || {}, mpc: cfg.gpsMpc || {}, seed: cfg.seed ?? 42,
           goal: (cfg.targetDestination || [0, cfg.targetGoalY || 25]).slice(0, 2)
         });
@@ -2474,11 +2474,11 @@ export class Simulation {
     }
 
     // Sensitivity-Gradient Tipping: physically admissible cable-only gait.
-    // MPC + GPS in cable-only mode realizes its GPS-MPC heading with the same
+    // MPC + GNSS in cable-only mode realizes its GNSS-MPC heading with the same
     // admissible tipping gait (the support-face gait barely rolls without aids).
-    const gpsTipping = cfg.controllerMode === 'mpc_gps' && cfg.pureCableActuation;
+    const gnssTipping = cfg.controllerMode === 'mpc_gnss' && cfg.pureCableActuation;
     const guided = cfg.controllerMode === 'guided_policy';
-    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gpsTipping || guided)) {
+    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gnssTipping || guided)) {
       if (!this.sgt) {
         const options = { ...(cfg.sgtOptions || {}) };
         if (guided) {
@@ -2512,11 +2512,11 @@ export class Simulation {
         coreTargets: command.coreTargets,
         rodTargets: new Array(this.rover.bars.length).fill(0),
         diagnostics: {
-          mode: guided ? 'guided_policy' : gpsTipping ? 'mpc_gps' : 'sgt_tipping',
+          mode: guided ? 'guided_policy' : gnssTipping ? 'mpc_gnss' : 'sgt_tipping',
           modeLabel: guided
-            ? (cfg.guidedPolicy?.teacher ? 'Guided policy search · MPC teacher' : 'Guided policy search · learned policy (MPC-guided)')
-            : gpsTipping ? 'MPC + GPS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
-          gps: gpsTipping && this.gpsState ? this.gpsDiagnostics() : null,
+            ? (cfg.guidedPolicy?.teacher ? 'MPC + GPS · MPC teacher (guided policy search)' : 'MPC + GPS · learned policy (guided policy search)')
+            : gnssTipping ? 'MPC + GNSS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
+          gnss: gnssTipping && this.gpsState ? this.gpsDiagnostics() : null,
           desiredDirection,
           predictedPath: [[centroid[0], centroid[1], centroid[2]],
             [centroid[0]+desiredDirection[0], centroid[1]+desiredDirection[1], centroid[2]]],
@@ -2711,7 +2711,7 @@ export class Simulation {
         solverConverged: advancedMode ? advancedSolution.converged : null,
         solverWorstCaseCost: advancedMode ? advancedSolution.worstCaseCost : null,
         solverMs: advancedMode ? advancedSolution.solveMs : null,
-        gps: cfg.controllerMode === 'mpc_gps' && this.gpsState ? this.gpsDiagnostics() : null
+        gnss: cfg.controllerMode === 'mpc_gnss' && this.gpsState ? this.gpsDiagnostics() : null
       }
     };
   }

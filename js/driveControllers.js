@@ -150,7 +150,7 @@ function getProfile(mode) {
       cablePenalty: 0.66, inputPenalty: 0.62, payloadWeight: 0.38,
       momentumBlend: 0.12, robustGain: 0.22, obstacleGain: 0.54, horizonScale: 1.25
     },
-    mpc_gps: {
+    mpc_gnss: {
       trackingGain: 0.92, phaseGain: 0.08, speedGain: 0.60,
       cablePenalty: 0.66, inputPenalty: 0.62, payloadWeight: 0.38,
       momentumBlend: 0.12, robustGain: 0.22, obstacleGain: 0.54, horizonScale: 1.25
