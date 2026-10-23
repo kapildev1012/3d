@@ -5,7 +5,7 @@
  *   results/paper/summary.json    aggregated metrics for every group
  *   results/paper/figure_data.json  mean ± 1 sigma time series for plotting
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { METHODS, SCENARIOS, ABLATIONS, meanStd, latexTable } from '../js/experimentProtocol.js';
@@ -31,14 +31,14 @@ const rowsI = methodOrder.map(m => {
 }).filter(Boolean);
 summary.nominal = rowsI;
 const tableI = latexTable(rowsI, [
-  { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: 'max' },
-  { key: 'rmse', label: 'RMSE (m)', digits: 3, better: null },
-  { key: 'mae', label: 'max $|e|$ (m)', digits: 3, better: null },
-  { key: 'effort', label: '$\\int\\!u^{\\top}u\\,dt$', digits: 3, better: 'min' },
-  { key: 'cot', label: 'CoT', digits: 1, better: 'min' },
-  { key: 'solveMsMean', label: '$t_{\\mathrm{solve}}$ (ms)', digits: 2, better: 'min' },
-  { key: 'success', label: 'Succ.\\ (\\%)', digits: 0, better: 'max', scale: 100, showStd: false },
-  { key: 'assistShare', label: 'Aid (\\%)', digits: 0, better: 'min', scale: 100, showStd: false }
+  { key: 'speed', label: '$\\bar v$ (m/s)\\,$\\uparrow$', digits: 3, better: 'max' },
+  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: null },
+  { key: 'mae', label: 'max $|e|$ (m)\\,$\\downarrow$', digits: 3, better: null },
+  { key: 'effort', label: '$\\int\\!u^{\\top}u\\,dt$\\,$\\downarrow$', digits: 3, better: 'min' },
+  { key: 'cot', label: 'CoT\\,$\\downarrow$', digits: 1, better: 'min' },
+  { key: 'solveMsMean', label: '$t_{\\mathrm{solve}}$ (ms)\\,$\\downarrow$', digits: 2, better: 'min' },
+  { key: 'success', label: 'Succ.\\ (\\%)\\,$\\uparrow$', digits: 0, better: 'max', scale: 100, showStd: false },
+  { key: 'assistShare', label: 'Aid (\\%)\\,$\\downarrow$', digits: 0, better: 'min', scale: 100, showStd: false }
 ], {
   caption: 'Nominal cable-only locomotion on Level 1 (20\\,s, 5 seeds, mean\\,$\\pm$\\,std). All methods use the Lagrangian DAE core, passive contact and identical actuator limits.',
   label: 'tab:nominal',
@@ -63,10 +63,10 @@ const physicsRows = [
 summary.physics = physicsRows;
 const tableII = latexTable(physicsRows, [
   { key: 'maxResidual', label: 'max $|\\varepsilon|$ (J)', digits: 1, better: null, sci: true },
-  { key: 'maxStepDrift', label: 'max $|\\delta_k|$ (J)', digits: 1, better: null, sci: true },
+  { key: 'maxStepDrift', label: 'max $|\\delta_k|$ (J)\\,$\\downarrow$', digits: 1, better: null, sci: true },
   { key: 'driftAbs', label: '$\\sum|\\delta_k|$ (J)', digits: 1, better: null, sci: true },
-  { key: 'maxBarError', label: 'bar err.\\ (m)', digits: 1, better: 'min', sci: true },
-  { key: 'numericalWork', label: '$|W_{\\mathrm{num}}|$ (J)', digits: 1, better: 'min', sci: true },
+  { key: 'maxBarError', label: 'bar err.\\ (m)\\,$\\downarrow$', digits: 1, better: 'min', sci: true },
+  { key: 'numericalWork', label: '$|W_{\\mathrm{num}}|$ (J)\\,$\\downarrow$', digits: 1, better: 'min', sci: true },
   { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: null },
   { key: 'assistShare', label: 'Aid (\\%)', digits: 0, better: null, scale: 100, showStd: false }
 ], {
@@ -113,10 +113,10 @@ const ablationRows = Object.entries(ABLATIONS).map(([key, def]) => {
 }).filter(Boolean);
 summary.ablation = ablationRows;
 const tableIV = latexTable(ablationRows, [
-  { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: 'max' },
-  { key: 'tips', label: 'tips', digits: 1, better: 'max' },
-  { key: 'rmse', label: 'RMSE (m)', digits: 3, better: 'min' },
-  { key: 'cot', label: 'CoT', digits: 1, better: 'min' },
+  { key: 'speed', label: '$\\bar v$ (m/s)\\,$\\uparrow$', digits: 3, better: 'max' },
+  { key: 'tips', label: 'tips\\,$\\uparrow$', digits: 1, better: 'max' },
+  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: 'min' },
+  { key: 'cot', label: 'CoT\\,$\\downarrow$', digits: 1, better: 'min' },
   { key: 'success', label: 'Succ.\\ (\\%)', digits: 0, better: 'max', scale: 100, showStd: false }
 ], { caption: 'Ablation of the SGT gait and of the physics core (Level 1, 20\\,s, 3 seeds).', label: 'tab:ablation' })
   .replace('Method &', 'Variant &');
@@ -133,12 +133,17 @@ for (const level of [1, 4, 7]) {
 summary.generalization = genRows;
 const tableV = latexTable(genRows, [
   { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: null },
-  { key: 'rmse', label: 'RMSE (m)', digits: 3, better: null },
+  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: null },
   { key: 'success', label: 'Succ.\\ (\\%)', digits: 0, better: null, scale: 100, showStd: false },
   { key: 'maxResidual', label: 'max $|\\varepsilon|$ (J)', digits: 1, better: null, sci: true }
 ], { caption: 'Terrain generalization (3 seeds per cell).', label: 'tab:terrain' }).replace('Method &', 'Terrain / method &');
 
 writeFileSync(path.join(outDir, 'tables.tex'), [tableI, tableII, tableIII, tableIV, tableV].join('\n\n')+'\n');
+// One file per table, so the paper can place each one where it is discussed.
+mkdirSync(path.join(outDir, 'tables'), { recursive: true });
+for (const [name, table] of [['nominal', tableI], ['physics', tableII], ['stress', tableIII], ['ablation', tableIV], ['terrain', tableV]]) {
+  writeFileSync(path.join(outDir, 'tables', `${name}.tex`), table+'\n');
+}
 writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, (k, v) => (k === 'runs' ? undefined : v), 2));
 
 // ---------------------------------------------------------------- figure data

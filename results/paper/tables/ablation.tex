@@ -1,0 +1,23 @@
+% requires \usepackage{booktabs,adjustbox}
+\begin{table}[t]
+\centering
+\caption{Ablation of the SGT gait and of the physics core (Level 1, 20\,s, 3 seeds).}
+\label{tab:ablation}
+\setlength{\tabcolsep}{2.5pt}
+\footnotesize
+\begin{adjustbox}{max width=\columnwidth}
+\begin{tabular}{lccccc}
+\toprule
+Variant & $\bar v$ (m/s)\,$\uparrow$ & tips\,$\uparrow$ & RMSE (m)\,$\downarrow$ & CoT\,$\downarrow$ & Succ.\ (\%) \\
+\midrule
+SGT (full) & 0.080\,$\pm$\,0.029 & 8.7\,$\pm$\,3.5 & 0.258\,$\pm$\,0.040 & 13.4\,$\pm$\,8.4 & \textbf{100} \\
+w/o payload actuation & 0.076\,$\pm$\,0.005 & 8.7\,$\pm$\,0.6 & 0.242\,$\pm$\,0.006 & 7.7\,$\pm$\,0.0 & \textbf{100} \\
+w/o feasibility edge choice & 0.102\,$\pm$\,0.034 & 10.3\,$\pm$\,0.6 & 0.260\,$\pm$\,0.041 & 8.9\,$\pm$\,3.8 & \textbf{100} \\
+w/o bar geometric stiffness & 0.056\,$\pm$\,0.010 & 5.7\,$\pm$\,1.2 & 0.194\,$\pm$\,0.001 & 23.5\,$\pm$\,4.3 & 67 \\
+sparse: 8 cables & 0.085\,$\pm$\,0.002 & 9.3\,$\pm$\,0.6 & 0.286\,$\pm$\,0.025 & \textbf{5.6\,$\pm$\,0.6} & \textbf{100} \\
+DAE w/o energy row & \textbf{0.104\,$\pm$\,0.029} & 10.3\,$\pm$\,2.1 & 0.242\,$\pm$\,0.026 & 9.4\,$\pm$\,5.1 & \textbf{100} \\
+legacy SHAKE core & 0.026 & \textbf{14.0} & \textbf{0.043} & 49.1 & 0 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}

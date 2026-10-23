@@ -19,6 +19,6 @@
     "experiments": "node tools/run_experiments.mjs --workers 2 --duration 20",
     "paper:data": "node tools/summarize_experiments.mjs && node tools/make_numbers.mjs && python3 tools/make_figures.py",
     "paper:pdf": "cd paper && latexmk -pdf -interaction=nonstopmode main.tex",
-    "paper:ext": "node tools/measure_sag.mjs && node tools/make_extension_tables.mjs"
+    "paper:ext": "node tools/measure_sag.mjs && node tools/make_extension_tables.mjs && node tools/teaser_frames.mjs && python3 tools/make_teaser.py"
   }
 }

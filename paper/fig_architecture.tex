@@ -1,0 +1,44 @@
+% Fig. 2: control architecture (TikZ). Requires \usepackage{tikz} and
+% \usetikzlibrary{positioning,arrows.meta,fit,backgrounds}.
+\begin{figure*}[t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  font=\footnotesize,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=9.5mm, inner sep=3pt, line width=0.5pt},
+  model/.style={box, fill=blue!7},
+  ctrl/.style={box, fill=orange!12},
+  learn/.style={box, fill=green!10},
+  safe/.style={box, fill=red!8},
+  plant/.style={box, fill=gray!12},
+  arr/.style={-{Stealth[length=2mm]}, line width=0.5pt},
+  train/.style={arr, dashed},
+  lab/.style={font=\scriptsize, fill=white, inner sep=1pt}
+]
+\node[plant, minimum width=31mm] (sim) {Energy-audited DAE\\[-1pt]\scriptsize shell + payload, passive contact,\\[-1pt]\scriptsize work ledger $\delta_k$ (500\,Hz)};
+\node[model, right=9mm of sim, minimum width=30mm] (kkt) {Pinned quasi-static KKT\\[-1pt]\scriptsize $\vect S=\partial\vect c/\partial\vect u,\ \vect X=\partial\vect q/\partial\vect u$\\[-1pt]\scriptsize (Sec.~\ref{sec:sgt}, 20\,Hz)};
+\node[ctrl, right=9mm of kkt, minimum width=27mm, yshift=9mm] (sgt) {SGT command\\[-1pt]\scriptsize $u_k=\bar u_k\,\mathrm{clip}(\hat g_k,-\rho,1)$};
+\node[ctrl, right=9mm of kkt, minimum width=27mm, yshift=-9mm] (mpc) {MPC teacher \eqref{eq:teacher}\\[-1pt]\scriptsize horizon, rate limits, $\lambda\|\tilde{\vect u}_1-\pi_\theta\|^2$};
+\node[learn, below=7mm of mpc, minimum width=27mm] (pol) {Policy $\pi_\theta(\vect o)$\\[-1pt]\scriptsize shared per-cable MLPs};
+\node[safe, right=9mm of mpc, minimum width=27mm, yshift=9mm] (filt) {Suspension-integrity\\filter \eqref{eq:shield}\\[-1pt]\scriptsize barriers on $\hat T$, $\hat d$; shift kept};
+\node[plant, right=7mm of filt, minimum width=14mm] (act) {36 cable\\spools};
+
+\coordinate (J) at ([xshift=-4mm]filt.west);
+\draw[arr] (sim) -- node[lab, above] {$\vect q,\dot{\vect q}$} (kkt);
+\draw[arr] (kkt.east) -- ++(3mm,0) |- (sgt.west);
+\draw[arr] (kkt.east) -- ++(3mm,0) |- (mpc.west);
+\draw[line width=0.5pt] (sgt.east) -| (J);
+\draw[line width=0.5pt] (mpc.east) -| (J);
+\draw[line width=0.5pt] (pol.east) -| (J);
+\fill (J) circle (0.6pt);
+\draw[arr] (J) -- (filt.west);
+\node[lab, left=0.5mm] at ([yshift=3mm]J) {$\vect u_{\mathrm{nom}}$};
+\draw[train] ([xshift=4mm]mpc.south) -- node[lab, right] {labels (S-step)} ([xshift=4mm]pol.north);
+\draw[train] ([xshift=-4mm]pol.north) -- node[lab, left] {$\pi_\theta$ (C-step)} ([xshift=-4mm]mpc.south);
+\draw[arr] ([xshift=-6mm]kkt.south) |- node[lab, pos=0.3, left] {$\vect X$} ([yshift=-4mm]pol.south -| filt.south) -- (filt.south);
+\draw[arr] (filt) -- node[lab, above] {$\vect u^\star$} (act);
+\draw[arr] (act.north) |- node[lab, pos=0.75, above] {rest lengths $l_0-\vect u$ (cable-only, no aids)} ([yshift=5mm]sgt.north -| sim.north) -- (sim.north);
+\end{tikzpicture}}
+\caption{Architecture. The energy-audited simulator (Sec.~\ref{sec:model}) provides the state; one factorization of the pinned quasi-static KKT system gives the sensitivities used by all three components: SGT (Sec.~\ref{sec:sgt}), the MPC teacher of MPC + GPS and its learned policy (Sec.~\ref{sec:gps}; dashed: training), and the suspension-integrity filter applied to any nominal command (Sec.~\ref{sec:shield}). The rover is actuated only through cable rest lengths.}
+\label{fig:arch}
+\end{figure*}

@@ -8,7 +8,7 @@
 \begin{adjustbox}{max width=\textwidth}
 \begin{tabular}{lcccccccc}
 \toprule
-Method & $\bar v$ (m/s) & RMSE (m) & max $|e|$ (m) & $\int\!u^{\top}u\,dt$ & CoT & $t_{\mathrm{solve}}$ (ms) & Succ.\ (\%) & Aid (\%) \\
+Method & $\bar v$ (m/s)\,$\uparrow$ & RMSE (m)\,$\downarrow$ & max $|e|$ (m)\,$\downarrow$ & $\int\!u^{\top}u\,dt$\,$\downarrow$ & CoT\,$\downarrow$ & $t_{\mathrm{solve}}$ (ms)\,$\downarrow$ & Succ.\ (\%)\,$\uparrow$ & Aid (\%)\,$\downarrow$ \\
 \midrule
 SGT (proposed) & \textbf{0.091\,$\pm$\,0.026} & 0.253\,$\pm$\,0.029 & 0.473\,$\pm$\,0.000 & \textbf{0.334\,$\pm$\,0.170} & \textbf{11.4\,$\pm$\,6.6} & 0.68\,$\pm$\,0.10 & \textbf{100} & 0 \\
 Heuristic & 0.004 & 0.083 & 0.160 & 2.059 & 142.4 & \textbf{0.47\,$\pm$\,0.25} & 0 & 0 \\
@@ -32,7 +32,7 @@ Legacy+assist$^\dagger$ & 0.522\,$\pm$\,0.023 & 0.006\,$\pm$\,0.002 & 0.017\,$\p
 \begin{adjustbox}{max width=\textwidth}
 \begin{tabular}{lccccccc}
 \toprule
-Method & max $|\varepsilon|$ (J) & max $|\delta_k|$ (J) & $\sum|\delta_k|$ (J) & bar err.\ (m) & $|W_{\mathrm{num}}|$ (J) & $\bar v$ (m/s) & Aid (\%) \\
+Method & max $|\varepsilon|$ (J) & max $|\delta_k|$ (J)\,$\downarrow$ & $\sum|\delta_k|$ (J) & bar err.\ (m)\,$\downarrow$ & $|W_{\mathrm{num}}|$ (J)\,$\downarrow$ & $\bar v$ (m/s) & Aid (\%) \\
 \midrule
 DAE + Alg.~1, energy row & $1.0{\times}10^{-9}$ & $7.6{\times}10^{-2}$ & $1.7{\times}10^{1}$ & \textbf{$2.3{\times}10^{-11}$} & \textbf{$7.3{\times}10^{-3}$} & 0.091\,$\pm$\,0.026 & 0 \\
 DAE + Alg.~1, constr.\ only & $1.5{\times}10^{1}$ & $7.1{\times}10^{0}$ & $3.3{\times}10^{1}$ & $5.9{\times}10^{-11}$ & $3.9{\times}10^{1}$ & 0.104\,$\pm$\,0.029 & 0 \\
@@ -80,7 +80,7 @@ Actuator delay 100 ms & 0.050\,$\pm$\,0.003 & 0.004 & 0.192\,$\pm$\,0.002 & -- &
 \begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lccccc}
 \toprule
-Variant & $\bar v$ (m/s) & tips & RMSE (m) & CoT & Succ.\ (\%) \\
+Variant & $\bar v$ (m/s)\,$\uparrow$ & tips\,$\uparrow$ & RMSE (m)\,$\downarrow$ & CoT\,$\downarrow$ & Succ.\ (\%) \\
 \midrule
 SGT (full) & 0.080\,$\pm$\,0.029 & 8.7\,$\pm$\,3.5 & 0.258\,$\pm$\,0.040 & 13.4\,$\pm$\,8.4 & \textbf{100} \\
 w/o payload actuation & 0.076\,$\pm$\,0.005 & 8.7\,$\pm$\,0.6 & 0.242\,$\pm$\,0.006 & 7.7\,$\pm$\,0.0 & \textbf{100} \\
@@ -104,7 +104,7 @@ legacy SHAKE core & 0.026 & \textbf{14.0} & \textbf{0.043} & 49.1 & 0 \\
 \begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcccc}
 \toprule
-Terrain / method & $\bar v$ (m/s) & RMSE (m) & Succ.\ (\%) & max $|\varepsilon|$ (J) \\
+Terrain / method & $\bar v$ (m/s) & RMSE (m)\,$\downarrow$ & Succ.\ (\%) & max $|\varepsilon|$ (J) \\
 \midrule
 Level 1: SGT & 0.080\,$\pm$\,0.029 & 0.258\,$\pm$\,0.040 & 100 & $1.0{\times}10^{-9}$ \\
 Level 1: Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
