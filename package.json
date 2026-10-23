@@ -3,7 +3,9 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
@@ -16,6 +18,7 @@
     "seed": "node tools/make_seed_benchmarks.mjs --duration 20",
     "experiments": "node tools/run_experiments.mjs --workers 2 --duration 20",
     "paper:data": "node tools/summarize_experiments.mjs && node tools/make_numbers.mjs && python3 tools/make_figures.py",
-    "paper:pdf": "cd paper && latexmk -pdf -interaction=nonstopmode main.tex"
+    "paper:pdf": "cd paper && latexmk -pdf -interaction=nonstopmode main.tex",
+    "paper:ext": "node tools/measure_sag.mjs && node tools/make_extension_tables.mjs"
   }
 }

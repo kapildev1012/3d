@@ -29,6 +29,7 @@
 
 \graphicspath{{../results/paper/figures/}}
 \input{../results/paper/numbers.tex}
+\input{../results/paper/numbers_ext.tex}
 
 \newcommand{\vect}[1]{\boldsymbol{#1}}
 \newcommand{\R}{\mathbb{R}}
@@ -36,8 +37,9 @@
 
 \begin{document}
 
-\title{Energy-Audited Lagrangian Simulation and Sensitivity-Gradient Tipping\\
-for Cable-Only Locomotion of a Six-Bar Tensegrity Rover}
+\title{Sensitivity-Gradient Tipping, MPC-Guided Policy Search and
+Suspension Integrity for Cable-Only Locomotion of an Energy-Audited
+Six-Bar Tensegrity Rover}
 
 \author{\IEEEauthorblockN{\todo{Author names}}
 \IEEEauthorblockA{\todo{Department of Robotics, Institution, City, Country}\\
@@ -74,13 +76,26 @@ actuator box. With cables only, SGT reaches \nSgtSpeed\,m/s
 and MPC schedulers over a support-face primitive advance at most
 \baseBestProgress\,m in 20\,s under identical limits. Ablations show
 that the geometric-stiffness term is the component that matters, and
-stress tests expose a sensitivity to heavy-tailed sensor noise. Code,
-run files and the scripts that produce every number are released.
+stress tests expose a sensitivity to heavy-tailed sensor noise.
+Building on SGT we contribute two further components. \emph{MPC + GPS}
+is MPC-guided policy search with a receding-horizon QP teacher on the
+same sensitivity model, which reduces exactly to SGT in a limit; the
+learned, permutation-equivariant cable policy reaches \gpsRatio\,\% of
+SGT's progress on held-out conditions without the per-tick KKT solve.
+We further find that while rolling the shell sags by \sagPercent\,\% and
+the payload cables, designed for \sagDesignTension\,N, carry only
+\sagMeanTension\,N on average and are slack \shSlackOffSgt\,\% of the
+time. A suspension-integrity filter that imposes discrete-time barrier
+conditions on the predicted cable tensions keeps them taut
+(\shSlackOnSgt\,\% slack time) in all \shConditions\ test conditions
+and, by preserving the tipping shift, increases SGT's progress by
+\shProgGainSgt\,\%. Code, run files and the scripts that produce every
+number are released.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Tensegrity robots, legged and rolling locomotion, simulation and
-animation, underactuated robots, energy-consistent integration.
+Tensegrity robots, rolling locomotion, guided policy search, control
+barrier functions, energy-consistent simulation.
 \end{IEEEkeywords}
 
 % ---------------------------------------------------------------------
@@ -125,6 +140,18 @@ linearizes the quasi-static equilibrium of shell and payload with the
 support pinned, including the geometric stiffness of the compressed
 bars, and commands all 36 actuators along the gradient of the COM
 displacement across a forward support edge.
+\item \emph{MPC + GPS (MPC-guided policy search).} A receding-horizon
+QP teacher on the SGT sensitivity model with spool-rate limits and a
+policy-proximity term, which reduces exactly to the SGT command in a
+limit, and a permutation-equivariant per-cable policy trained from it by
+guided policy search \cite{levine2013guided,zhang2016mpcgps}.
+Throughout, GPS denotes Guided Policy Search.
+\item \emph{Suspension integrity.} The observation that the payload
+suspension of a rolling six-bar rover loses its pretension, and a
+safety filter that minimally corrects any tipping controller with
+discrete-time barrier conditions on the predicted cable tensions and a
+shift-preserving constraint, using the sensitivities SGT already
+computes.
 \item \emph{Protocol and audit.} A deterministic, seed-locked benchmark
 shared by the interactive application and a headless batch runner: five
 baselines with identical actuator limits, impulse and step
@@ -134,8 +161,9 @@ and three terrains (114 runs). Tables, figures and every number in the
 text are generated from the run files.
 \end{enumerate}
 To our knowledge, the combination of a per-step energy audit with a
-sensitivity-based cable-only tipping gait has not been reported for
-six-bar tensegrity rovers. All claims are restricted to simulation
+sensitivity-based cable-only tipping gait, a teacher for guided policy
+search derived from it, and a filter for the integrity of the payload
+suspension has not been reported for six-bar tensegrity rovers. All claims are restricted to simulation
 (Section~\ref{sec:limits}); in particular the negative results for
 the baselines concern the support-face primitive they schedule, not
 the optimal-control methods as such.
@@ -162,6 +190,25 @@ hand-designed cable sequences, kinodynamic planning over gait primitives
 execute; SGT instead computes the primitive itself from the local
 quasi-static sensitivity of the COM and is therefore complementary to
 primitive-level planners.
+
+\emph{Guided policy search.} Guided policy search trains a policy by
+supervised learning on the actions of local trajectory optimizers that
+are themselves kept close to the policy \cite{levine2013guided,
+montgomery2016mdgps}; the MPC-guided variant uses a model-predictive
+controller as teacher \cite{zhang2016mpcgps}, and PLATO executes the
+policy-regularized teacher while labelling with the unregularized one
+\cite{kahn2017plato}, which, like DAgger \cite{ross2011dagger}, trains
+on the learner's own state distribution. Guided policy search has been
+applied to SUPERball \cite{zhang2017deep}. Our teacher differs in that
+it is a QP on the constrained quasi-static sensitivity of the shell
+rather than on a learned or generic local model, and our learner is
+shared across cables.
+
+\emph{Safety filters.} Control barrier functions enforce forward
+invariance of a safe set by a minimal correction of a nominal input
+\cite{ames2017cbf}; the discrete-time condition
+$h_{k+1}\ge(1-\gamma)h_k$ \cite{agrawal2017dcbf} is the form we use. We
+are not aware of their use for the suspension of a tensegrity payload.
 
 % ---------------------------------------------------------------------
 \section{Energy-Audited Shell Dynamics}\label{sec:model}
@@ -338,6 +385,139 @@ precisely in the bending directions that tipping needs. The ablations in
 Section~\ref{sec:results} test which of these ingredients matter.
 
 % ---------------------------------------------------------------------
+\section{MPC + GPS: MPC-Guided Policy Search}\label{sec:gps}
+
+\subsection{Teacher: receding-horizon QP on the sensitivity model}
+For the locked edge $e$, let
+$\hat{\vect g}=[\vect g_{e,\mathrm{shell}}/\|\vect g_{e,\mathrm{shell}}\|_\infty;\
+\vect g_{e,\mathrm{core}}/\|\vect g_{e,\mathrm{core}}\|_\infty]$ be the
+normalized COM-shift gradient and $\tilde{\vect u}=\vect u/\bar{\vect u}$
+the normalized command. Over $N$ steps of $\Delta t$ the teacher solves
+\begin{equation}
+\begin{aligned}
+\min_{\tilde{\vect u}_{1:N}}\;&\textstyle\sum_{k=1}^{N}\big(-\hat{\vect g}^\top\tilde{\vect u}_k
++\tfrac r2\|\tilde{\vect u}_k\|^2\big)
++\tfrac{r_\Delta}{2}\textstyle\sum_{k=1}^{N}\|\tilde{\vect u}_k-\tilde{\vect u}_{k-1}\|^2\\
+&+\tfrac{\lambda}{2}\|\tilde{\vect u}_1-\pi_\theta(\vect o)\|^2\\
+\text{s.t.}\;&\underline{\tilde u}\le\tilde{\vect u}_k\le1,\quad
+|\tilde{\vect u}_k-\tilde{\vect u}_{k-1}|\le\rho_s,
+\end{aligned}
+\label{eq:teacher}
+\end{equation}
+with $\tilde{\vect u}_0$ the current spool state and $\rho_s$ the spool
+speed times $\Delta t$. The problem is separable per actuator and is
+solved by projected gradient; the first step is applied and the
+problem is re-solved at 20\,Hz.
+
+\emph{Relation to SGT.} For $N=1$, $r=1$, $r_\Delta=\lambda=0$ and an
+inactive rate bound, each actuator minimizes $-\hat g_k\tilde u_k+\tfrac12\tilde u_k^2$
+on $[\underline{\tilde u}_k,1]$, whose solution is
+$\mathrm{clip}(\hat g_k,\underline{\tilde u}_k,1)$, i.e.\ exactly the SGT
+command of Section~\ref{sec:sgt}. The teacher therefore generalizes SGT
+with a horizon, spool-rate limits and a smoothness term ($N=6$,
+$\Delta t=50$\,ms, $r_\Delta=0.2$), and $\lambda>0$ adds the
+policy-proximity term of guided policy search, the quadratic form of
+the KL constraint between fixed-covariance Gaussian policies.
+
+\subsection{Learner: a permutation-equivariant cable policy}
+The policy $\pi_\theta$ does not use the KKT model. Each outer cable is
+described by 20 local features in the frame of the travel direction:
+midpoint relative to the COM, end-node clearances, signed distance to
+the locked edge and along it, membership of its end nodes in the
+support face and edge, orientation invariants
+$(\vect e^\top\vect n_e)e_z$, $(\vect e^\top\vect n_e)^2$, $e_z^2$
+(invariant to the sign of $\vect e$), current offset and strain, and
+global context (COM velocity, gait state, margin, time in state). The
+12 payload cables have 19 analogous features. One MLP with two hidden
+layers of 48 units is shared by all outer cables and one of 36 units by
+all payload cables, so the policy is equivariant to the cable
+numbering and independent of which face the rover rests on.
+
+\subsection{Training}
+Algorithm~\ref{alg:gps} alternates a C-step, which rolls out the
+teacher regularized toward the current policy plus two episodes that
+execute the policy itself, and an S-step, which retrains the policy by
+regression on the aggregated data. Every visited state is labelled with
+the \emph{unregularized} teacher, as in PLATO \cite{kahn2017plato}. We
+use $\lambda_i\in\{0,0.5,1,2,\dots\}$, four 15\,s episodes per
+iteration over Levels 1 and 3 and goals straight ahead or offset by
+$\pm8$ to $\pm10$\,m, and \gpsIterations\ iterations
+(\gpsSamples\ labelled actuator samples).
+
+\begin{algorithm}[t]
+\caption{MPC-guided policy search (MPC + GPS)}\label{alg:gps}
+\begin{algorithmic}[1]
+\State $\mathcal D\gets\emptyset$; roll out teacher \eqref{eq:teacher} with $\lambda=0$; add $(\vect o,\tilde{\vect u}^\star)$ to $\mathcal D$
+\For{$i=1,\dots,I$}
+  \State fit $\pi_\theta$ on $\mathcal D$ (Adam, mean-squared error)
+  \State roll out teacher with $\lambda_i$ \Comment{C-step, executes $\tilde{\vect u}_\lambda$}
+  \State roll out $\pi_\theta$ \Comment{learner's own states}
+  \State label every state with teacher $\lambda=0$; add to $\mathcal D$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Deployment}
+At run time the policy replaces the per-tick KKT solve while the
+\textsc{Settle}--\textsc{Release} state machine is kept. Choosing the
+edge by alignment alone sent the policy to edges it could not tip over;
+the deployed controller therefore solves \eqref{eq:kkt} once per tip
+cycle to pick the edge with the largest reachable margin, as the
+teacher does, and excludes edges that aborted from the same face.
+
+% ---------------------------------------------------------------------
+\section{Suspension-Integrity Filter}\label{sec:shield}
+
+\subsection{Observation}
+Gravity and the outer-cable actuation compress the shell while it
+rolls: under SGT the mean node height drops from \sagInitialHeight\,m to
+\sagMeanHeight\,m (\sagPercent\,\%). The node-to-payload distances
+shrink with it, and the payload cables, pretensioned to
+\sagDesignTension\,N, carry \sagMeanTension\,N on average; at least one
+of the 12 is slack in \shAnySlackOff\,\% of the samples
+(Table~\ref{tab:shield}). The ``suspended'' payload is therefore loose in
+the cage for most of the motion.
+
+\subsection{Filter}
+Let $\vect u_{\mathrm{nom}}\in\R^{36}$ be the command of any tipping
+controller (SGT, the teacher or the policy). The filter returns
+\begin{equation}
+\begin{aligned}
+\vect u^\star=\arg\min_{\vect u}\;&\tfrac12(\vect u-\vect u_{\mathrm{nom}})^\top\vect W(\vect u-\vect u_{\mathrm{nom}})\\
+\text{s.t.}\;&\hat h_c(\vect u)\ge(1-\gamma)\,h_c,\quad c\in\mathcal C,\\
+&\hat{\vect g}^\top(\vect u-\vect u_0)\ge\hat{\vect g}^\top(\vect u_{\mathrm{nom}}-\vect u_0),\\
+&\underline{\vect u}\le\vect u\le\bar{\vect u},
+\end{aligned}
+\label{eq:shield}
+\end{equation}
+where $\vect u_0$ is the current command and $\hat h_c$ is the first-order
+prediction of a safety function from the displacement sensitivities
+$\vect X=\partial\vect q/\partial\vect u$ that \eqref{eq:kkt} already
+provides. For a cable between nodes $i,j$ with stiffness $k$, rest
+length $l_0$ and direction $\vect e$,
+$\hat T(\vect u)=k\big(L-l_0+u_{\mathrm{self}}+\vect e^\top(\vect X_j-\vect X_i)(\vect u-\vect u_0)\big)$.
+The safety set $\mathcal C$ contains payload-cable tension
+$T\ge10$\,N, outer-cable tension $T\le150$\,N and payload-to-rod
+clearance $d\ge0.08$\,m (core radius 0.05\,m), the latter linearized at
+the closest point of each rod. The barrier condition is the
+discrete-time form of \cite{agrawal2017dcbf}: it keeps a satisfied
+constraint satisfied and restores a violated one at rate $\gamma=0.3$
+per control step. The second constraint preserves the nominal
+command's predicted COM shift across the locked edge; without it the
+filter cancels the payload-cable slackening that SGT uses to tip and
+costs progress; with it the filter must re-route the tipping effort,
+mainly by pulling the leading payload cables. It is dropped if it
+conflicts with the barriers. $\vect W$ weights outer cables ten times
+more than payload cables, so corrections are made mainly with the
+payload suspension. The QP is solved by accelerated projected gradient
+on the dual \cite{beck2009fista} with the box kept exact in the primal.
+
+\emph{Scope of the guarantee.} The conditions hold for the quasi-static
+prediction $\hat h$. Tumbling and impacts are inertial events that this
+prediction does not contain; the closed-loop results below are
+therefore empirical, and we report where they fail.
+
+% ---------------------------------------------------------------------
 \section{Experimental Protocol}\label{sec:setup}
 
 \emph{Platform.} Shell radius 0.5\,m (bar length 0.851\,m), 12 nodes of
@@ -359,6 +539,18 @@ search, and box-constrained projected-gradient MPC, respectively.
 \emph{Legacy+assist}$^\dagger$: the original penalty+SHAKE engine with
 roll couple, traction, grip and corridor aids; reported as a reference
 only, because it is not admissible.
+
+\emph{MPC + GPS and filter studies.} The policy is evaluated on
+\gpsEvalConditions\ held-out conditions (unseen seeds, Levels 1 and 3,
+straight and $\pm6$\,m offset goals, 20\,s) against SGT and the
+unregularized teacher. The filter is evaluated for SGT and the policy,
+each with and without it, in \shConditions\ paired conditions (three
+seeds on Level~1, two on Level~3, push, impulse, payload $+30\,\%$,
+100\,ms delay, cable stiffness $-20\,\%$; 20\,s), with payload-cable
+slack time, mean payload-cable tension, payload rattle (RMS of the
+payload position relative to the shell centroid), 99th-percentile
+payload acceleration, minimal payload--rod clearance and maximal
+outer-cable tension measured after the first second.
 
 \emph{Scenarios.} Lateral impulse $\Delta v=0.5$\,m/s at $t=6$\,s; step
 push 10\,N for 2\,s; Gaussian, Laplace and outlier (2\,\%, $10\times$)
@@ -437,6 +629,40 @@ delay (3 seeds, error bars $\pm1\sigma$).}
 \label{fig:ablation}
 \end{figure}
 
+\input{../results/paper/tables_ext.tex}
+
+\subsection{MPC + GPS}
+On the held-out conditions the learned policy advances
+\gpsPolicyProgress\,m in 20\,s, \gpsRatio\,\% of SGT
+(\gpsSgtProgress\,m) and \gpsTeacherRatio\,\% of the teacher
+(\gpsTeacherProgress\,m), with \gpsPolicyAborts\ aborted cycles per run
+(Table~\ref{tab:gps}). It exceeds SGT in one condition
+(\gpsBestPolicy\,m vs.\ \gpsBestSgt\,m). The unregularized teacher is
+itself slightly faster than SGT, which we attribute to its rate-aware
+smoothing. The policy is not cheaper per tick in our implementation
+(\gpsPolicyMs\ vs.\ \gpsSgtMs\,ms): for 13 nodes the KKT solve is already
+inexpensive, so the value of the policy lies in replacing the model
+evaluation by a learned map, not in speed.
+
+\subsection{Suspension integrity}
+With the filter the payload cables are slack \shSlackOnSgt\,\% of the
+time under SGT (\shSlackOffSgt\,\% without) and \shSlackOnGps\,\% under
+the policy (\shSlackOffGps\,\%), in all \shConditions\ conditions
+(Table~\ref{tab:shield}); the mean payload-cable tension rises from
+\shTensionOffSgt\ to \shTensionOnSgt\,N. For SGT the taut suspension
+also makes tipping more effective: progress increases from
+\shProgOffSgt\ to \shProgOnSgt\,m ($+\shProgGainSgt\,\%$, better in
+\shProgBetterSgt\ of \shConditions\ conditions) and aborted cycles fall
+from \shAbortOffSgt\ to \shAbortOnSgt. For the policy, whose progress is
+unchanged (\shProgOffGps\ vs.\ \shProgOnGps\,m), the filter restores the
+suspension at no cost in progress. The filter does not reduce peak
+loads: in \shClearViol\ of \shFilteredRuns\ filtered runs the payload
+came closer than 0.08\,m to a rod (minimum \shClearMin\,m), in
+\shOuterViol\ runs an outer cable exceeded 150\,N, and the
+99th-percentile payload acceleration of SGT increased. These are the
+inertial events outside the quasi-static prediction
+(Section~\ref{sec:shield}). The filter adds \shMs\,ms per control step.
+
 % ---------------------------------------------------------------------
 \section{Limitations}\label{sec:limits}
 All results are in simulation. The contact parameters ($k$, $\alpha$,
@@ -456,6 +682,23 @@ support-face primitive from the original code base; stronger
 whole-body optimal controllers may close part of the gap, and the
 released protocol is intended to make such comparisons easy.
 
+The MPC + GPS policy imitates a teacher built on the same quasi-static
+model, so it inherits its limitations and is evaluated on
+\gpsEvalConditions\ held-out conditions only; it still needs one KKT
+solve per tip cycle for edge selection and is not faster than SGT. The
+suspension-integrity filter certifies its constraints only for the
+quasi-static prediction: payload clearance and cable loads during
+tumbling and impacts are not guaranteed, which requires a second-order
+barrier on the DAE dynamics. Finally, the modelled shell is a regular
+icosahedron (offset ratio $d/h=1/\varphi$); a form-finding analysis
+with the TsgFEM equilibrium matrix \cite{ma2022tsgfem} shows that this
+shape admits no self-stress state, whereas the expanded octahedron
+($d/h=0.5$) admits one. The modelled rest geometry is therefore not a
+prestressed equilibrium, and the shell deforms away from it as soon as
+the simulation starts; part of the sag reported in
+Section~\ref{sec:shield} may originate here, and repeating the study on
+the form-found shape is future work.
+
 \section{Conclusion}
 We showed how to make tensegrity-rover simulation \emph{auditable}: a
 non-minimal Lagrangian DAE with exact multipliers, a minimum-norm
@@ -468,7 +711,12 @@ conventional penalty+projection engine. On this basis, the
 sensitivity-gradient tipping gait achieves cable-only rolling of a
 six-bar rover with a heavy payload where reduced-order effort schedulers
 over a fixed primitive do not; the bars' geometric stiffness is the
-ingredient of the sensitivity that matters most. Code, run files and the scripts that
+ingredient of the sensitivity that matters most. The same sensitivity
+model serves as the teacher of an MPC-guided policy search (MPC + GPS)
+whose learned per-cable policy reaches \gpsRatio\,\% of SGT's progress,
+and as the prediction model of a suspension-integrity filter that keeps
+the payload cables taut and, by preserving the tipping shift, makes SGT
+\shProgGainSgt\,\% faster. Code, run files and the scripts that
 generate every table and figure are released with the paper.
 
 \section*{Reproducibility}
@@ -477,6 +725,11 @@ generate every table and figure are released with the paper.
 \texttt{tables.tex}, \texttt{numbers.tex} and all figures, and
 \texttt{node tools/drift\_check.mjs} repeats the time-step study; the same
 protocol runs in the browser (\emph{Comparative benchmark} panel).
+\texttt{node tools/train\_guided\_policy.mjs} trains and evaluates the
+MPC + GPS policy, \texttt{node tools/run\_shield\_study.mjs} and
+\texttt{node tools/measure\_sag.mjs} produce the filter study, and
+\texttt{node tools/make\_extension\_tables.mjs} regenerates
+Tables~\ref{tab:gps} and~\ref{tab:shield} and their numbers.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
