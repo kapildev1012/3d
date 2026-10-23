@@ -14,8 +14,9 @@
 %     missing from the repository copy);
 %   * entries in references.bib marked VERIFY.
 % =====================================================================
-\documentclass[conference]{IEEEtran}
-\IEEEoverridecommandlockouts
+\documentclass[letterpaper,10pt,journal,twoside]{IEEEtran}
+% IEEE Robotics and Automation Letters (RA-L): 6 pages + up to 2 paid pages,
+% references included; single-blind; abstract <= 250 words.
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
@@ -33,7 +34,7 @@
 
 \newcommand{\vect}[1]{\boldsymbol{#1}}
 \newcommand{\R}{\mathbb{R}}
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\todo}[1]{\textcolor[rgb]{0.85,0,0}{[TODO: #1]}}
 
 \begin{document}
 
@@ -41,61 +42,50 @@
 Suspension Integrity for Cable-Only Locomotion of an Energy-Audited
 Six-Bar Tensegrity Rover}
 
-\author{\IEEEauthorblockN{\todo{Author names}}
-\IEEEauthorblockA{\todo{Department of Robotics, Institution, City, Country}\\
-\todo{email}}}
+\author{\todo{First Author}$^{1}$ and \todo{Second Author}$^{2}$%
+\thanks{Manuscript received: \todo{Month, Day, Year}; Revised \todo{Month, Day, Year}; Accepted \todo{Month, Day, Year}.}%
+\thanks{This paper was recommended for publication by Editor \todo{Name} upon evaluation of the Associate Editor and Reviewers' comments.}%
+\thanks{\todo{Funding acknowledgement.}}%
+\thanks{$^{1}$\todo{Department, Institution, City, Country} {\tt\small \todo{email}}}%
+\thanks{$^{2}$\todo{Department, Institution, City, Country}}%
+\thanks{Digital Object Identifier (DOI): see top of this page.}}
+
+\markboth{IEEE Robotics and Automation Letters. Preprint Version. Accepted \todo{Month}, \todo{Year}}
+{\todo{Surname} \MakeLowercase{\textit{et al.}}: Cable-Only Locomotion of a Six-Bar Tensegrity Rover}
 
 \maketitle
 
 % ---------------------------------------------------------------------
 \begin{abstract}
-Simulation results for rolling tensegrity robots are hard to trust when
-the simulator itself can create or destroy energy: penalty-spring bars
-followed by position projection, ground clamps and ``helper'' torques
-can all produce apparent locomotion that the cables alone could not.
-We present a simulator and a gait for a six-bar tensegrity rover with an
-internal payload in which every joule is accounted for. The shell is
-modelled in non-minimal Cartesian coordinates with the consistent
-rigid-bar mass matrix and exact bar-length multipliers; contact is a
-passive Hunt--Crossley law whose elastic part is a potential; and a
-work ledger books every force and every projection and measures, at
-each step and before any correction, the energy that no booked work
-explains. This per-step drift is first-order discretization error
-(it halves when the time step is halved) and is then removed by a
-minimum-norm constraint-and-energy corrector. The audit shows that a
-conventional penalty+SHAKE engine exchanges $\pLegacyNum$\,J with its
-position projection to keep the bars rigid and, in its interactive
-form, takes \pLegacyAidShare\,\% of its energy input from non-physical
-aids. On the audited simulator we propose Sensitivity-Gradient Tipping
-(SGT), which differentiates the pinned quasi-static equilibrium,
-including the softening geometric stiffness of the compressed bars, to
-obtain the sensitivity of the centre of mass to all 36 shell and
-payload cables, and drives it across a forward support edge within the
-actuator box. With cables only, SGT reaches \nSgtSpeed\,m/s
-(\nSgtSuccess\,\% success over 5 seeds), whereas reduced-order LQR, iLQR
-and MPC schedulers over a support-face primitive advance at most
-\baseBestProgress\,m in 20\,s under identical limits. Ablations show
-that the geometric-stiffness term is the component that matters, and
-stress tests expose a sensitivity to heavy-tailed sensor noise.
-Building on SGT we contribute two further components. \emph{MPC + GPS}
-is MPC-guided policy search with a receding-horizon QP teacher on the
-same sensitivity model, which reduces exactly to SGT in a limit; the
-learned, permutation-equivariant cable policy reaches \gpsRatio\,\% of
-SGT's progress on held-out conditions without the per-tick KKT solve.
-We further find that while rolling the shell sags by \sagPercent\,\% and
-the payload cables, designed for \sagDesignTension\,N, carry only
-\sagMeanTension\,N on average and are slack \shSlackOffSgt\,\% of the
-time. A suspension-integrity filter that imposes discrete-time barrier
-conditions on the predicted cable tensions keeps them taut
-(\shSlackOnSgt\,\% slack time) in all \shConditions\ test conditions
-and, by preserving the tipping shift, increases SGT's progress by
-\shProgGainSgt\,\%. Code, run files and the scripts that produce every
+Rolling tensegrity robots are usually developed in simulators that can
+create energy through projections, contact clamps or helper torques, so
+apparent locomotion may not be produced by the cables. We present a
+six-bar tensegrity rover with an internal payload whose simulation is
+energy-audited: a non-minimal Lagrangian model with exact bar
+multipliers, passive contact and a work ledger that measures, before
+correction, the energy each step creates without a booked cause. On this
+simulator we propose three controllers that act through cable rest
+lengths only. Sensitivity-Gradient Tipping (SGT) differentiates the
+pinned quasi-static equilibrium, including the bars' geometric
+stiffness, and drives the centre of mass across a support edge; it
+reaches \nSgtSpeed\,m/s, whereas reduced-order LQR, iLQR and MPC
+schedulers of a support-face primitive advance at most
+\baseBestProgress\,m in 20\,s. MPC + GPS, an MPC-guided policy search
+whose quadratic-program teacher reduces exactly to SGT, learns a
+permutation-equivariant cable policy that reaches \gpsRatio\,\% of SGT's
+progress on held-out conditions. Finally, we observe that the payload
+cables lose their pretension while the shell rolls and are slack
+\shSlackOffSgt\,\% of the time; a suspension-integrity filter with
+discrete-time barrier conditions on the predicted tensions reduces this
+to \shSlackOnSgt\,\% in all \shConditions\ test conditions and, by
+preserving the tipping shift, increases SGT's progress by
+\shProgGainSgt\,\%. Code, run files and the scripts that generate every
 number are released.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Tensegrity robots, rolling locomotion, guided policy search, control
-barrier functions, energy-consistent simulation.
+Underactuated robots, imitation learning, robot safety, simulation and
+animation, space robotics and automation.
 \end{IEEEkeywords}
 
 % ---------------------------------------------------------------------
@@ -578,17 +568,6 @@ leave the pad therefore produce identical runs (zero spread).
 \subsection{Physical consistency}
 \input{results_physics.tex}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{fig_physics_consistency.pdf}
-\caption{Physical consistency under the SGT gait (Level 1, mean
-$\pm1\sigma$ shaded). (a) Ledger residual $|\varepsilon(t)|$ after correction (held at the
-solver tolerance by the energy row; it accumulates without it).
-(b) Maximal bar-length error. Solid: DAE with energy row; dashed: DAE
-with constraint rows only; dotted: legacy penalty+SHAKE core.}
-\label{fig:physics}
-\end{figure*}
-
 \subsection{Nominal locomotion}
 \input{results_nominal.tex}
 
@@ -601,33 +580,11 @@ Solid: proposed; dashed: baselines; dotted: inadmissible reference.}
 \label{fig:nominal}
 \end{figure*}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig_sgt_path.pdf}
-\caption{Ground track of the COM under SGT (seed 1, 20\,s).}
-\label{fig:path}
-\end{figure}
-
 \subsection{Robustness}
 \input{results_stress.tex}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig_robustness.pdf}
-\caption{Mean speed under disturbances, sensor noise, plant mismatch and
-delay (3 seeds, error bars $\pm1\sigma$).}
-\label{fig:robust}
-\end{figure}
-
 \subsection{Ablation and terrain}
 \input{results_ablation.tex}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig_ablation.pdf}
-\caption{Ablation of SGT components and of the physics core (3 seeds).}
-\label{fig:ablation}
-\end{figure}
 
 \input{../results/paper/tables_ext.tex}
 
@@ -675,8 +632,7 @@ single seed. SGT is sensitive to heavy-tailed measurement noise
 hardware use. SGT is quasi-static: it ignores inertia during the tip and
 re-plans only at 20\,Hz, which limits speed to the order of
 \SI{0.1}{m/s}. Edge selection is greedy per cycle, which causes the
-zig-zag ground track and cross-track error visible in
-Fig.~\ref{fig:path}; a heading-aware selection over several faces is a
+zig-zag ground track and cross-track error (RMSE \nSgtRmse\,m); a heading-aware selection over several faces is a
 natural extension. The baselines inherit a reduced-order model and the
 support-face primitive from the original code base; stronger
 whole-body optimal controllers may close part of the gap, and the
@@ -720,16 +676,9 @@ the payload cables taut and, by preserving the tipping shift, makes SGT
 generate every table and figure are released with the paper.
 
 \section*{Reproducibility}
-\texttt{npm run experiments} executes the full protocol
-(114 runs, resumable), \texttt{npm run paper:data} regenerates
-\texttt{tables.tex}, \texttt{numbers.tex} and all figures, and
-\texttt{node tools/drift\_check.mjs} repeats the time-step study; the same
-protocol runs in the browser (\emph{Comparative benchmark} panel).
-\texttt{node tools/train\_guided\_policy.mjs} trains and evaluates the
-MPC + GPS policy, \texttt{node tools/run\_shield\_study.mjs} and
-\texttt{node tools/measure\_sag.mjs} produce the filter study, and
-\texttt{node tools/make\_extension\_tables.mjs} regenerates
-Tables~\ref{tab:gps} and~\ref{tab:shield} and their numbers.
+\texttt{npm run experiments \&\& npm run paper:data \&\& npm run paper:ext}
+reruns all experiments and regenerates every table, figure and number;
+the training and filter studies are in \texttt{tools/}.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
