@@ -1,23 +1,24 @@
-% requires \usepackage{booktabs,adjustbox}
 \begin{table*}[t]
 \centering
-\caption{Nominal cable-only locomotion on Level 1 (20\,s, 5 seeds, mean\,$\pm$\,std). All methods use the Lagrangian DAE core, passive contact and identical actuator limits.}
+\caption{Nominal cable-only locomotion (Level 1, 20\,s, 5 seeds, mean\,$\pm$\,std).}
 \label{tab:nominal}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\textwidth}
-\begin{tabular}{lcccccccc}
+\begin{tabular}{@{}lcccccccc@{}}
 \toprule
-Method & $\bar v$ (m/s)\,$\uparrow$ & RMSE (m)\,$\downarrow$ & max $|e|$ (m)\,$\downarrow$ & $\int\!u^{\top}u\,dt$\,$\downarrow$ & CoT\,$\downarrow$ & $t_{\mathrm{solve}}$ (ms)\,$\downarrow$ & Succ.\ (\%)\,$\uparrow$ & Aid (\%)\,$\downarrow$ \\
+Method & Speed $\bar v$\,$\uparrow$ & RMSE\,$\downarrow$ & max $|e|$\,$\downarrow$ & Effort\,$\downarrow$ & CoT\,$\downarrow$ & $t_{\mathrm{solve}}$\,$\downarrow$ & Success\,$\uparrow$ & Aid\,$\downarrow$ \\
+ & {\scriptsize (m/s)} & {\scriptsize (m)} & {\scriptsize (m)} & {\scriptsize (m$^2$s)} & {\scriptsize (--)} & {\scriptsize (ms)} & {\scriptsize (\%)} & {\scriptsize (\%)} \\
 \midrule
-SGT (proposed) & \textbf{0.091\,$\pm$\,0.026} & 0.253\,$\pm$\,0.029 & 0.473\,$\pm$\,0.000 & \textbf{0.334\,$\pm$\,0.170} & \textbf{11.4\,$\pm$\,6.6} & 0.68\,$\pm$\,0.10 & \textbf{100} & 0 \\
-Heuristic & 0.004 & 0.083 & 0.160 & 2.059 & 142.4 & \textbf{0.47\,$\pm$\,0.25} & 0 & 0 \\
-LQR & 0.002 & 0.129 & 0.163 & 2.529 & -- & 0.65\,$\pm$\,0.06 & 0 & 0 \\
-iLQR & 0.005 & 0.081 & 0.168 & 1.757\,$\pm$\,0.000 & 111.8 & 0.90\,$\pm$\,0.41 & 0 & 0 \\
-QP-MPC & 0.004 & 0.084 & 0.175 & 1.859\,$\pm$\,0.000 & 132.0 & 0.82\,$\pm$\,0.05 & 0 & 0 \\
-Legacy+assist$^\dagger$ & 0.522\,$\pm$\,0.023 & 0.006\,$\pm$\,0.002 & 0.017\,$\pm$\,0.006 & 0.636\,$\pm$\,0.060 & 1.1\,$\pm$\,0.1 & 0.15\,$\pm$\,0.02 & 100 & 50 \\
+SGT (proposed) & \textbf{0.091}\,{\scriptsize$\pm$0.026} & 0.253\,{\scriptsize$\pm$0.029} & 0.473\,{\scriptsize$\pm$0.000} & \textbf{0.334}\,{\scriptsize$\pm$0.170} & \textbf{11.4}\,{\scriptsize$\pm$6.6} & 0.68\,{\scriptsize$\pm$0.10} & \textbf{100} & 0 \\
+Heuristic & 0.004 & 0.083 & 0.160 & 2.059 & 142.4 & \textbf{0.47}\,{\scriptsize$\pm$0.25} & 0 & 0 \\
+LQR & 0.002 & 0.129 & 0.163 & 2.529 & -- & 0.65\,{\scriptsize$\pm$0.06} & 0 & 0 \\
+iLQR & 0.005 & 0.081 & 0.168 & 1.757\,{\scriptsize$\pm$0.000} & 111.8 & 0.90\,{\scriptsize$\pm$0.41} & 0 & 0 \\
+QP-MPC & 0.004 & 0.084 & 0.175 & 1.859\,{\scriptsize$\pm$0.000} & 132.0 & 0.82\,{\scriptsize$\pm$0.05} & 0 & 0 \\
+Legacy+assist$^\dagger$ & 0.522\,{\scriptsize$\pm$0.023} & 0.006\,{\scriptsize$\pm$0.002} & 0.017\,{\scriptsize$\pm$0.006} & 0.636\,{\scriptsize$\pm$0.060} & 1.1\,{\scriptsize$\pm$0.1} & 0.15\,{\scriptsize$\pm$0.02} & 100 & 50 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
-\\[2pt]\parbox{\textwidth}{\scriptsize $^\dagger$Legacy engine with external roll couple, traction, grip and corridor aids; not physically admissible and excluded from the bold ``best'' marks. Success: $\Delta y \ge 1$\,m in 20\,s. Aid: share of the energy input supplied by non-physical aids. Cross-track errors are not marked because they are only comparable between methods that travel a similar distance.}
+\par\vspace{3pt}\parbox{\textwidth}{\scriptsize\raggedright All methods use the Lagrangian DAE core, passive contact and identical actuator limits. Effort: $\int\!\vect u^{\top}\vect u\,dt$. Success: $\Delta y \ge 1$\,m in 20\,s. Aid: share of the energy input supplied by non-physical aids. Bold: best admissible value; cross-track errors are not marked because they are only comparable between methods that travel a similar distance. $^\dagger$Original engine with roll couple, traction, grip and corridor aids; not admissible, shown for reference.}
 \end{table*}

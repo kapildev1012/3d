@@ -1,117 +1,143 @@
-% requires \usepackage{booktabs,adjustbox}
 \begin{table*}[t]
 \centering
-\caption{Nominal cable-only locomotion on Level 1 (20\,s, 5 seeds, mean\,$\pm$\,std). All methods use the Lagrangian DAE core, passive contact and identical actuator limits.}
+\caption{Nominal cable-only locomotion (Level 1, 20\,s, 5 seeds, mean\,$\pm$\,std).}
 \label{tab:nominal}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\textwidth}
-\begin{tabular}{lcccccccc}
+\begin{tabular}{@{}lcccccccc@{}}
 \toprule
-Method & $\bar v$ (m/s)\,$\uparrow$ & RMSE (m)\,$\downarrow$ & max $|e|$ (m)\,$\downarrow$ & $\int\!u^{\top}u\,dt$\,$\downarrow$ & CoT\,$\downarrow$ & $t_{\mathrm{solve}}$ (ms)\,$\downarrow$ & Succ.\ (\%)\,$\uparrow$ & Aid (\%)\,$\downarrow$ \\
+Method & Speed $\bar v$\,$\uparrow$ & RMSE\,$\downarrow$ & max $|e|$\,$\downarrow$ & Effort\,$\downarrow$ & CoT\,$\downarrow$ & $t_{\mathrm{solve}}$\,$\downarrow$ & Success\,$\uparrow$ & Aid\,$\downarrow$ \\
+ & {\scriptsize (m/s)} & {\scriptsize (m)} & {\scriptsize (m)} & {\scriptsize (m$^2$s)} & {\scriptsize (--)} & {\scriptsize (ms)} & {\scriptsize (\%)} & {\scriptsize (\%)} \\
 \midrule
-SGT (proposed) & \textbf{0.091\,$\pm$\,0.026} & 0.253\,$\pm$\,0.029 & 0.473\,$\pm$\,0.000 & \textbf{0.334\,$\pm$\,0.170} & \textbf{11.4\,$\pm$\,6.6} & 0.68\,$\pm$\,0.10 & \textbf{100} & 0 \\
-Heuristic & 0.004 & 0.083 & 0.160 & 2.059 & 142.4 & \textbf{0.47\,$\pm$\,0.25} & 0 & 0 \\
-LQR & 0.002 & 0.129 & 0.163 & 2.529 & -- & 0.65\,$\pm$\,0.06 & 0 & 0 \\
-iLQR & 0.005 & 0.081 & 0.168 & 1.757\,$\pm$\,0.000 & 111.8 & 0.90\,$\pm$\,0.41 & 0 & 0 \\
-QP-MPC & 0.004 & 0.084 & 0.175 & 1.859\,$\pm$\,0.000 & 132.0 & 0.82\,$\pm$\,0.05 & 0 & 0 \\
-Legacy+assist$^\dagger$ & 0.522\,$\pm$\,0.023 & 0.006\,$\pm$\,0.002 & 0.017\,$\pm$\,0.006 & 0.636\,$\pm$\,0.060 & 1.1\,$\pm$\,0.1 & 0.15\,$\pm$\,0.02 & 100 & 50 \\
+SGT (proposed) & \textbf{0.091}\,{\scriptsize$\pm$0.026} & 0.253\,{\scriptsize$\pm$0.029} & 0.473\,{\scriptsize$\pm$0.000} & \textbf{0.334}\,{\scriptsize$\pm$0.170} & \textbf{11.4}\,{\scriptsize$\pm$6.6} & 0.68\,{\scriptsize$\pm$0.10} & \textbf{100} & 0 \\
+Heuristic & 0.004 & 0.083 & 0.160 & 2.059 & 142.4 & \textbf{0.47}\,{\scriptsize$\pm$0.25} & 0 & 0 \\
+LQR & 0.002 & 0.129 & 0.163 & 2.529 & -- & 0.65\,{\scriptsize$\pm$0.06} & 0 & 0 \\
+iLQR & 0.005 & 0.081 & 0.168 & 1.757\,{\scriptsize$\pm$0.000} & 111.8 & 0.90\,{\scriptsize$\pm$0.41} & 0 & 0 \\
+QP-MPC & 0.004 & 0.084 & 0.175 & 1.859\,{\scriptsize$\pm$0.000} & 132.0 & 0.82\,{\scriptsize$\pm$0.05} & 0 & 0 \\
+Legacy+assist$^\dagger$ & 0.522\,{\scriptsize$\pm$0.023} & 0.006\,{\scriptsize$\pm$0.002} & 0.017\,{\scriptsize$\pm$0.006} & 0.636\,{\scriptsize$\pm$0.060} & 1.1\,{\scriptsize$\pm$0.1} & 0.15\,{\scriptsize$\pm$0.02} & 100 & 50 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
-\\[2pt]\parbox{\textwidth}{\scriptsize $^\dagger$Legacy engine with external roll couple, traction, grip and corridor aids; not physically admissible and excluded from the bold ``best'' marks. Success: $\Delta y \ge 1$\,m in 20\,s. Aid: share of the energy input supplied by non-physical aids. Cross-track errors are not marked because they are only comparable between methods that travel a similar distance.}
+\par\vspace{3pt}\parbox{\textwidth}{\scriptsize\raggedright All methods use the Lagrangian DAE core, passive contact and identical actuator limits. Effort: $\int\!\vect u^{\top}\vect u\,dt$. Success: $\Delta y \ge 1$\,m in 20\,s. Aid: share of the energy input supplied by non-physical aids. Bold: best admissible value; cross-track errors are not marked because they are only comparable between methods that travel a similar distance. $^\dagger$Original engine with roll couple, traction, grip and corridor aids; not admissible, shown for reference.}
 \end{table*}
 
-% requires \usepackage{booktabs,adjustbox}
 \begin{table*}[t]
 \centering
-\caption{Physical consistency of the simulator under the SGT gait (Level 1, 20\,s). $\varepsilon = E-E_0-\sum W$ is the energy no booked work explains \emph{after} correction (enforced by the energy row); $\delta_k$ is the same quantity for step $k$ \emph{before} correction, i.e.\ the per-step bound on any unbooked energy source; $|W_{\mathrm{num}}|$ is the energy changed by constraint projections and by the corrector (booked, but numerical). SGT on Level 1, 20\,s; $^\dagger$the original engine with its locomotion aids and support-face gait, for reference.}
+\caption{Physical consistency of the simulator under the SGT gait (Level 1, 20\,s).}
 \label{tab:physics}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\textwidth}
-\begin{tabular}{lccccccc}
+\begin{tabular}{@{}lccccccc@{}}
 \toprule
-Method & max $|\varepsilon|$ (J) & max $|\delta_k|$ (J)\,$\downarrow$ & $\sum|\delta_k|$ (J) & bar err.\ (m)\,$\downarrow$ & $|W_{\mathrm{num}}|$ (J)\,$\downarrow$ & $\bar v$ (m/s) & Aid (\%) \\
+Physics core & max $|\varepsilon|$ & max $|\delta_k|$\,$\downarrow$ & $\sum_k|\delta_k|$\,$\downarrow$ & Bar error\,$\downarrow$ & $|W_{\mathrm{num}}|$\,$\downarrow$ & Speed $\bar v$ & Aid\,$\downarrow$ \\
+ & {\scriptsize (J)} & {\scriptsize (J)} & {\scriptsize (J)} & {\scriptsize (m)} & {\scriptsize (J)} & {\scriptsize (m/s)} & {\scriptsize (\%)} \\
 \midrule
-DAE + Alg.~1, energy row & $1.0{\times}10^{-9}$ & $7.6{\times}10^{-2}$ & $1.7{\times}10^{1}$ & \textbf{$2.3{\times}10^{-11}$} & \textbf{$7.3{\times}10^{-3}$} & 0.091\,$\pm$\,0.026 & 0 \\
-DAE + Alg.~1, constr.\ only & $1.5{\times}10^{1}$ & $7.1{\times}10^{0}$ & $3.3{\times}10^{1}$ & $5.9{\times}10^{-11}$ & $3.9{\times}10^{1}$ & 0.104\,$\pm$\,0.029 & 0 \\
+DAE + Alg.~1, energy row & $1.0{\times}10^{-9}$ & $7.6{\times}10^{-2}$ & $1.7{\times}10^{1}$ & \textbf{$2.3{\times}10^{-11}$} & \textbf{$7.3{\times}10^{-3}$} & 0.091\,{\scriptsize$\pm$0.026} & 0 \\
+DAE + Alg.~1, constr.\ only & $1.5{\times}10^{1}$ & $7.1{\times}10^{0}$ & $3.3{\times}10^{1}$ & $5.9{\times}10^{-11}$ & $3.9{\times}10^{1}$ & 0.104\,{\scriptsize$\pm$0.029} & 0 \\
 Penalty + SHAKE (legacy) & $1.1{\times}10^{1}$ & $1.1{\times}10^{-3}$ & $1.1{\times}10^{1}$ & $1.3{\times}10^{-7}$ & $6.8{\times}10^{3}$ & 0.026 & 0 \\
-Legacy + assists$^\dagger$ & $1.1{\times}10^{1}$ & $1.2{\times}10^{-3}$ & $1.1{\times}10^{1}$ & $1.9{\times}10^{-4}$ & $1.5{\times}10^{4}$ & 0.522\,$\pm$\,0.023 & 50 \\
+Legacy + assists$^\dagger$ & $1.1{\times}10^{1}$ & $1.2{\times}10^{-3}$ & $1.1{\times}10^{1}$ & $1.9{\times}10^{-4}$ & $1.5{\times}10^{4}$ & 0.522\,{\scriptsize$\pm$0.023} & 50 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
+\par\vspace{3pt}\parbox{\textwidth}{\scriptsize\raggedright $\varepsilon=E-E_0-\sum W$: energy that no booked work explains \emph{after} correction (held at solver tolerance by the energy row). $\delta_k$: the same quantity for step $k$ \emph{before} correction, i.e.\ the per-step bound on any unbooked energy source. $|W_{\mathrm{num}}|$: energy changed by constraint projections and by the corrector (booked, but numerical). $^\dagger$Original engine with its locomotion aids and support-face gait.}
 \end{table*}
 
-% requires \usepackage{booktabs,adjustbox}
 \begin{table}[t]
 \centering
-\caption{Robustness: disturbances, sensor noise, plant mismatch and actuator delay (Level 1, 20\,s, 3 seeds).}
+\caption{Robustness of SGT (Level 1, 20\,s, 3 seeds).}
 \label{tab:stress}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\columnwidth}
-\begin{tabular}{lccccc}
+\begin{tabular}{@{}lccccc@{}}
 \toprule
-Scenario & SGT $\bar v$ (m/s) & Heur.\ $\bar v$ (m/s) & SGT RMSE (m) & $t_{\mathrm{rec}}$ (s) & SGT succ.\ (\%) \\
+Scenario & SGT $\bar v$\,$\uparrow$ & Heur.\ $\bar v$ & SGT RMSE\,$\downarrow$ & $t_{\mathrm{rec}}$\,$\downarrow$ & Success\,$\uparrow$ \\
+ & {\scriptsize (m/s)} & {\scriptsize (m/s)} & {\scriptsize (m)} & {\scriptsize (s)} & {\scriptsize (\%)} \\
 \midrule
-Nominal & 0.080\,$\pm$\,0.029 & 0.004 & 0.258\,$\pm$\,0.040 & -- & 100 \\
-Lateral impulse 0.5 m/s & 0.094\,$\pm$\,0.017 & 0.004 & 0.266\,$\pm$\,0.011 & 0.09 & 100 \\
-Step push 10 N, 2 s & 0.085\,$\pm$\,0.006 & -0.001 & 0.308\,$\pm$\,0.035 & 2.00 & 100 \\
-Gaussian sensor noise & 0.065\,$\pm$\,0.016 & 0.001\,$\pm$\,0.002 & 0.219\,$\pm$\,0.030 & -- & 67 \\
-Laplace sensor noise & 0.026\,$\pm$\,0.016 & -0.001\,$\pm$\,0.004 & 0.158\,$\pm$\,0.036 & -- & 0 \\
-Sensor outliers (2 \%, 10x) & 0.034\,$\pm$\,0.023 & 0.002\,$\pm$\,0.002 & 0.167\,$\pm$\,0.052 & -- & 33 \\
-Cable stiffness -20 \% & 0.057\,$\pm$\,0.002 & 0.002 & 0.226\,$\pm$\,0.004 & -- & 100 \\
-Friction -40 \% & 0.104\,$\pm$\,0.024 & 0.002 & 0.224\,$\pm$\,0.051 & -- & 100 \\
-Payload mass +30 \% & 0.083\,$\pm$\,0.016 & 0.002 & 0.249\,$\pm$\,0.022 & -- & 100 \\
-Actuator delay 100 ms & 0.050\,$\pm$\,0.003 & 0.004 & 0.192\,$\pm$\,0.002 & -- & 67 \\
+\multicolumn{6}{@{}l}{\textit{Reference}} \\
+\quad Nominal & 0.080\,{\scriptsize$\pm$0.029} & 0.004 & 0.258\,{\scriptsize$\pm$0.040} & -- & 100 \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Disturbance}} \\
+\quad Lateral impulse 0.5\,m/s & 0.094\,{\scriptsize$\pm$0.017} & 0.004 & 0.266\,{\scriptsize$\pm$0.011} & 0.09 & 100 \\
+\quad Push 10\,N for 2\,s & 0.085\,{\scriptsize$\pm$0.006} & $-$0.001 & 0.308\,{\scriptsize$\pm$0.035} & 2.00 & 100 \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Sensor noise}} \\
+\quad Gaussian & 0.065\,{\scriptsize$\pm$0.016} & 0.001\,{\scriptsize$\pm$0.002} & 0.219\,{\scriptsize$\pm$0.030} & -- & 67 \\
+\quad Laplace & 0.026\,{\scriptsize$\pm$0.016} & $-$0.001\,{\scriptsize$\pm$0.004} & 0.158\,{\scriptsize$\pm$0.036} & -- & 0 \\
+\quad Outliers (2\,\%, $10\times$) & 0.034\,{\scriptsize$\pm$0.023} & 0.002\,{\scriptsize$\pm$0.002} & 0.167\,{\scriptsize$\pm$0.052} & -- & 33 \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Plant mismatch}} \\
+\quad Cable stiffness $-20$\,\% & 0.057\,{\scriptsize$\pm$0.002} & 0.002 & 0.226\,{\scriptsize$\pm$0.004} & -- & 100 \\
+\quad Friction $-40$\,\% & 0.104\,{\scriptsize$\pm$0.024} & 0.002 & 0.224\,{\scriptsize$\pm$0.051} & -- & 100 \\
+\quad Payload mass $+30$\,\% & 0.083\,{\scriptsize$\pm$0.016} & 0.002 & 0.249\,{\scriptsize$\pm$0.022} & -- & 100 \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Actuation}} \\
+\quad Delay 100\,ms & 0.050\,{\scriptsize$\pm$0.003} & 0.004 & 0.192\,{\scriptsize$\pm$0.002} & -- & 67 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
+\par\vspace{3pt}\parbox{\columnwidth}{\scriptsize\raggedright Heur.: support-face heuristic under the same scenario. $t_{\mathrm{rec}}$: time to regain the nominal heading after the disturbance.}
 \end{table}
 
-% requires \usepackage{booktabs,adjustbox}
 \begin{table}[t]
 \centering
-\caption{Ablation of the SGT gait and of the physics core (Level 1, 20\,s, 3 seeds).}
+\caption{Ablation of SGT and of the physics core (Level 1, 20\,s, 3 seeds).}
 \label{tab:ablation}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\columnwidth}
-\begin{tabular}{lccccc}
+\begin{tabular}{@{}lccccc@{}}
 \toprule
-Variant & $\bar v$ (m/s)\,$\uparrow$ & tips\,$\uparrow$ & RMSE (m)\,$\downarrow$ & CoT\,$\downarrow$ & Succ.\ (\%) \\
+Variant & Speed $\bar v$\,$\uparrow$ & Tips\,$\uparrow$ & RMSE\,$\downarrow$ & CoT\,$\downarrow$ & Success\,$\uparrow$ \\
+ & {\scriptsize (m/s)} & {\scriptsize } & {\scriptsize (m)} & {\scriptsize (--)} & {\scriptsize (\%)} \\
 \midrule
-SGT (full) & 0.080\,$\pm$\,0.029 & 8.7\,$\pm$\,3.5 & 0.258\,$\pm$\,0.040 & 13.4\,$\pm$\,8.4 & \textbf{100} \\
-w/o payload actuation & 0.076\,$\pm$\,0.005 & 8.7\,$\pm$\,0.6 & 0.242\,$\pm$\,0.006 & 7.7\,$\pm$\,0.0 & \textbf{100} \\
-w/o feasibility edge choice & 0.102\,$\pm$\,0.034 & 10.3\,$\pm$\,0.6 & 0.260\,$\pm$\,0.041 & 8.9\,$\pm$\,3.8 & \textbf{100} \\
-w/o bar geometric stiffness & 0.056\,$\pm$\,0.010 & 5.7\,$\pm$\,1.2 & 0.194\,$\pm$\,0.001 & 23.5\,$\pm$\,4.3 & 67 \\
-sparse: 8 cables & 0.085\,$\pm$\,0.002 & 9.3\,$\pm$\,0.6 & 0.286\,$\pm$\,0.025 & \textbf{5.6\,$\pm$\,0.6} & \textbf{100} \\
-DAE w/o energy row & \textbf{0.104\,$\pm$\,0.029} & 10.3\,$\pm$\,2.1 & 0.242\,$\pm$\,0.026 & 9.4\,$\pm$\,5.1 & \textbf{100} \\
-legacy SHAKE core & 0.026 & \textbf{14.0} & \textbf{0.043} & 49.1 & 0 \\
+\multicolumn{6}{@{}l}{\textit{Proposed}} \\
+\quad SGT (full) & 0.080\,{\scriptsize$\pm$0.029} & 8.7\,{\scriptsize$\pm$3.5} & 0.258\,{\scriptsize$\pm$0.040} & 13.4\,{\scriptsize$\pm$8.4} & \textbf{100} \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Gait ingredients}} \\
+\quad w/o payload actuation & 0.076\,{\scriptsize$\pm$0.005} & 8.7\,{\scriptsize$\pm$0.6} & 0.242\,{\scriptsize$\pm$0.006} & 7.7\,{\scriptsize$\pm$0.0} & \textbf{100} \\
+\quad w/o feasibility edge choice & 0.102\,{\scriptsize$\pm$0.034} & 10.3\,{\scriptsize$\pm$0.6} & 0.260\,{\scriptsize$\pm$0.041} & 8.9\,{\scriptsize$\pm$3.8} & \textbf{100} \\
+\quad w/o bar geometric stiffness & 0.056\,{\scriptsize$\pm$0.010} & 5.7\,{\scriptsize$\pm$1.2} & 0.194\,{\scriptsize$\pm$0.001} & 23.5\,{\scriptsize$\pm$4.3} & 67 \\
+\quad sparse: 8 cables & 0.085\,{\scriptsize$\pm$0.002} & 9.3\,{\scriptsize$\pm$0.6} & 0.286\,{\scriptsize$\pm$0.025} & \textbf{5.6}\,{\scriptsize$\pm$0.6} & \textbf{100} \\
+\addlinespace[2pt]
+\multicolumn{6}{@{}l}{\textit{Physics core}} \\
+\quad DAE w/o energy row & \textbf{0.104}\,{\scriptsize$\pm$0.029} & 10.3\,{\scriptsize$\pm$2.1} & 0.242\,{\scriptsize$\pm$0.026} & 9.4\,{\scriptsize$\pm$5.1} & \textbf{100} \\
+\quad legacy SHAKE core & 0.026 & \textbf{14.0} & \textbf{0.043} & 49.1 & 0 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
 \end{table}
 
-% requires \usepackage{booktabs,adjustbox}
 \begin{table}[t]
 \centering
 \caption{Terrain generalization (3 seeds per cell).}
 \label{tab:terrain}
-\setlength{\tabcolsep}{2.5pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.08}
 \footnotesize
 \begin{adjustbox}{max width=\columnwidth}
-\begin{tabular}{lcccc}
+\begin{tabular}{@{}lcccc@{}}
 \toprule
-Terrain / method & $\bar v$ (m/s) & RMSE (m)\,$\downarrow$ & Succ.\ (\%) & max $|\varepsilon|$ (J) \\
+Method & Speed $\bar v$\,$\uparrow$ & RMSE\,$\downarrow$ & Success\,$\uparrow$ & max $|\varepsilon|$ \\
+ & {\scriptsize (m/s)} & {\scriptsize (m)} & {\scriptsize (\%)} & {\scriptsize (J)} \\
 \midrule
-Level 1: SGT & 0.080\,$\pm$\,0.029 & 0.258\,$\pm$\,0.040 & 100 & $1.0{\times}10^{-9}$ \\
-Level 1: Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
-Level 4: SGT & 0.074\,$\pm$\,0.019 & 0.275\,$\pm$\,0.044 & 100 & $1.0{\times}10^{-9}$ \\
-Level 4: Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
-Level 7: SGT & 0.087\,$\pm$\,0.020 & 0.229\,$\pm$\,0.008 & 100 & $1.5{\times}10^{-2}$ \\
-Level 7: Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
+\multicolumn{5}{@{}l}{\textit{Level 1 (rolling plain)}} \\
+\quad SGT & 0.080\,{\scriptsize$\pm$0.029} & 0.258\,{\scriptsize$\pm$0.040} & 100 & $1.0{\times}10^{-9}$ \\
+\quad Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
+\addlinespace[2pt]
+\multicolumn{5}{@{}l}{\textit{Level 4 (rocky)}} \\
+\quad SGT & 0.074\,{\scriptsize$\pm$0.019} & 0.275\,{\scriptsize$\pm$0.044} & 100 & $1.0{\times}10^{-9}$ \\
+\quad Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
+\addlinespace[2pt]
+\multicolumn{5}{@{}l}{\textit{Level 7 (rugged relief)}} \\
+\quad SGT & 0.087\,{\scriptsize$\pm$0.020} & 0.229\,{\scriptsize$\pm$0.008} & 100 & $1.5{\times}10^{-2}$ \\
+\quad Heuristic & 0.004 & 0.083 & 0 & $9.9{\times}10^{-10}$ \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}

@@ -31,19 +31,20 @@ const rowsI = methodOrder.map(m => {
 }).filter(Boolean);
 summary.nominal = rowsI;
 const tableI = latexTable(rowsI, [
-  { key: 'speed', label: '$\\bar v$ (m/s)\\,$\\uparrow$', digits: 3, better: 'max' },
-  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: null },
-  { key: 'mae', label: 'max $|e|$ (m)\\,$\\downarrow$', digits: 3, better: null },
-  { key: 'effort', label: '$\\int\\!u^{\\top}u\\,dt$\\,$\\downarrow$', digits: 3, better: 'min' },
-  { key: 'cot', label: 'CoT\\,$\\downarrow$', digits: 1, better: 'min' },
-  { key: 'solveMsMean', label: '$t_{\\mathrm{solve}}$ (ms)\\,$\\downarrow$', digits: 2, better: 'min' },
-  { key: 'success', label: 'Succ.\\ (\\%)\\,$\\uparrow$', digits: 0, better: 'max', scale: 100, showStd: false },
-  { key: 'assistShare', label: 'Aid (\\%)\\,$\\downarrow$', digits: 0, better: 'min', scale: 100, showStd: false }
+  { key: 'speed', label: 'Speed $\\bar v$\\,$\\uparrow$ (m/s)', digits: 3, better: 'max' },
+  { key: 'rmse', label: 'RMSE\\,$\\downarrow$ (m)', digits: 3, better: null },
+  { key: 'mae', label: 'max $|e|$\\,$\\downarrow$ (m)', digits: 3, better: null },
+  { key: 'effort', label: 'Effort\\,$\\downarrow$ (m$^2$s)', digits: 3, better: 'min' },
+  { key: 'cot', label: 'CoT\\,$\\downarrow$ (--)', digits: 1, better: 'min' },
+  { key: 'solveMsMean', label: '$t_{\\mathrm{solve}}$\\,$\\downarrow$ (ms)', digits: 2, better: 'min' },
+  { key: 'success', label: 'Success\\,$\\uparrow$ (\\%)', digits: 0, better: 'max', scale: 100, showStd: false },
+  { key: 'assistShare', label: 'Aid\\,$\\downarrow$ (\\%)', digits: 0, better: 'min', scale: 100, showStd: false }
 ], {
-  caption: 'Nominal cable-only locomotion on Level 1 (20\\,s, 5 seeds, mean\\,$\\pm$\\,std). All methods use the Lagrangian DAE core, passive contact and identical actuator limits.',
+  caption: 'Nominal cable-only locomotion (Level 1, 20\\,s, 5 seeds, mean\\,$\\pm$\\,std).',
   label: 'tab:nominal',
   wide: true,
-  note: '$^\\dagger$Legacy engine with external roll couple, traction, grip and corridor aids; not physically admissible and excluded from the bold ``best\'\' marks. Success: $\\Delta y \\ge 1$\\,m in 20\\,s. Aid: share of the energy input supplied by non-physical aids. Cross-track errors are not marked because they are only comparable between methods that travel a similar distance.'
+  paper: true,
+  note: 'All methods use the Lagrangian DAE core, passive contact and identical actuator limits. Effort: $\\int\\!\\vect u^{\\top}\\vect u\\,dt$. Success: $\\Delta y \\ge 1$\\,m in 20\\,s. Aid: share of the energy input supplied by non-physical aids. Bold: best admissible value; cross-track errors are not marked because they are only comparable between methods that travel a similar distance. $^\\dagger$Original engine with roll couple, traction, grip and corridor aids; not admissible, shown for reference.'
 });
 
 // ---------------------------------------------------------------- Table II physics
@@ -63,16 +64,19 @@ const physicsRows = [
 summary.physics = physicsRows;
 const tableII = latexTable(physicsRows, [
   { key: 'maxResidual', label: 'max $|\\varepsilon|$ (J)', digits: 1, better: null, sci: true },
-  { key: 'maxStepDrift', label: 'max $|\\delta_k|$ (J)\\,$\\downarrow$', digits: 1, better: null, sci: true },
-  { key: 'driftAbs', label: '$\\sum|\\delta_k|$ (J)', digits: 1, better: null, sci: true },
-  { key: 'maxBarError', label: 'bar err.\\ (m)\\,$\\downarrow$', digits: 1, better: 'min', sci: true },
-  { key: 'numericalWork', label: '$|W_{\\mathrm{num}}|$ (J)\\,$\\downarrow$', digits: 1, better: 'min', sci: true },
-  { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: null },
-  { key: 'assistShare', label: 'Aid (\\%)', digits: 0, better: null, scale: 100, showStd: false }
+  { key: 'maxStepDrift', label: 'max $|\\delta_k|$\\,$\\downarrow$ (J)', digits: 1, better: null, sci: true },
+  { key: 'driftAbs', label: '$\\sum_k|\\delta_k|$\\,$\\downarrow$ (J)', digits: 1, better: null, sci: true },
+  { key: 'maxBarError', label: 'Bar error\\,$\\downarrow$ (m)', digits: 1, better: 'min', sci: true },
+  { key: 'numericalWork', label: '$|W_{\\mathrm{num}}|$\\,$\\downarrow$ (J)', digits: 1, better: 'min', sci: true },
+  { key: 'speed', label: 'Speed $\\bar v$ (m/s)', digits: 3, better: null },
+  { key: 'assistShare', label: 'Aid\\,$\\downarrow$ (\\%)', digits: 0, better: null, scale: 100, showStd: false }
 ], {
-  caption: 'Physical consistency of the simulator under the SGT gait (Level 1, 20\\,s). $\\varepsilon = E-E_0-\\sum W$ is the energy no booked work explains \\emph{after} correction (enforced by the energy row); $\\delta_k$ is the same quantity for step $k$ \\emph{before} correction, i.e.\\ the per-step bound on any unbooked energy source; $|W_{\\mathrm{num}}|$ is the energy changed by constraint projections and by the corrector (booked, but numerical). SGT on Level 1, 20\\,s; $^\\dagger$the original engine with its locomotion aids and support-face gait, for reference.',
+  caption: 'Physical consistency of the simulator under the SGT gait (Level 1, 20\\,s).',
   label: 'tab:physics',
-  wide: true
+  wide: true,
+  paper: true,
+  firstHeader: 'Physics core',
+  note: '$\\varepsilon=E-E_0-\\sum W$: energy that no booked work explains \\emph{after} correction (held at solver tolerance by the energy row). $\\delta_k$: the same quantity for step $k$ \\emph{before} correction, i.e.\\ the per-step bound on any unbooked energy source. $|W_{\\mathrm{num}}|$: energy changed by constraint projections and by the corrector (booked, but numerical). $^\\dagger$Original engine with its locomotion aids and support-face gait.'
 });
 
 // ---------------------------------------------------------------- Table III stress
@@ -84,7 +88,10 @@ for (const scenario of ['nominal', 'impulse', 'push', 'gaussian', 'laplace', 'ou
   const sgt = of('sgt'), heu = of('heuristic');
   if (!sgt.length) continue;
   stressRows.push({
-    label: SCENARIOS[scenario].label, n: sgt.length,
+    label: ({ nominal: 'Nominal', impulse: 'Lateral impulse 0.5\\,m/s', push: 'Push 10\\,N for 2\\,s', gaussian: 'Gaussian',
+      laplace: 'Laplace', outlier: 'Outliers (2\\,\\%, $10\\times$)', stiffness: 'Cable stiffness $-20$\\,\\%',
+      friction: 'Friction $-40$\\,\\%', payload: 'Payload mass $+30$\\,\\%', delay: 'Delay 100\\,ms' })[scenario] || SCENARIOS[scenario].label,
+    scenario, n: sgt.length,
     cells: {
       sgtSpeed: meanStd(sgt.map(r => r.metrics.speed)),
       heuSpeed: meanStd(heu.map(r => r.metrics.speed)),
@@ -95,16 +102,28 @@ for (const scenario of ['nominal', 'impulse', 'push', 'gaussian', 'laplace', 'ou
   });
 }
 summary.stress = stressRows;
+const stressGroups = [];
+{
+  const at = name => stressRows.findIndex(r => r.scenario === name);
+  for (const [name, label] of [['nominal', 'Reference'], ['impulse', 'Disturbance'], ['gaussian', 'Sensor noise'], ['stiffness', 'Plant mismatch'], ['delay', 'Actuation']]) {
+    const index = at(name);
+    if (index >= 0 && !stressGroups.some(g => g.at === index)) stressGroups.push({ at: index, label });
+  }
+}
 const tableIII = latexTable(stressRows, [
-  { key: 'sgtSpeed', label: 'SGT $\\bar v$ (m/s)', digits: 3, better: null },
+  { key: 'sgtSpeed', label: 'SGT $\\bar v$\\,$\\uparrow$ (m/s)', digits: 3, better: null },
   { key: 'heuSpeed', label: 'Heur.\\ $\\bar v$ (m/s)', digits: 3, better: null },
-  { key: 'sgtRmse', label: 'SGT RMSE (m)', digits: 3, better: null },
-  { key: 'sgtRecovery', label: '$t_{\\mathrm{rec}}$ (s)', digits: 2, better: null },
-  { key: 'sgtSuccess', label: 'SGT succ.\\ (\\%)', digits: 0, better: null, scale: 100, showStd: false }
+  { key: 'sgtRmse', label: 'SGT RMSE\\,$\\downarrow$ (m)', digits: 3, better: null },
+  { key: 'sgtRecovery', label: '$t_{\\mathrm{rec}}$\\,$\\downarrow$ (s)', digits: 2, better: null },
+  { key: 'sgtSuccess', label: 'Success\\,$\\uparrow$ (\\%)', digits: 0, better: null, scale: 100, showStd: false }
 ], {
-  caption: 'Robustness: disturbances, sensor noise, plant mismatch and actuator delay (Level 1, 20\\,s, 3 seeds).',
-  label: 'tab:stress'
-}).replace('{lccccc}', '{lccccc}').replace('Method &', 'Scenario &');
+  caption: 'Robustness of SGT (Level 1, 20\\,s, 3 seeds).',
+  label: 'tab:stress',
+  paper: true,
+  firstHeader: 'Scenario',
+  groups: stressGroups,
+  note: 'Heur.: support-face heuristic under the same scenario. $t_{\\mathrm{rec}}$: time to regain the nominal heading after the disturbance.'
+});
 
 // ---------------------------------------------------------------- Table IV ablation
 const ablationRows = Object.entries(ABLATIONS).map(([key, def]) => {
@@ -113,13 +132,18 @@ const ablationRows = Object.entries(ABLATIONS).map(([key, def]) => {
 }).filter(Boolean);
 summary.ablation = ablationRows;
 const tableIV = latexTable(ablationRows, [
-  { key: 'speed', label: '$\\bar v$ (m/s)\\,$\\uparrow$', digits: 3, better: 'max' },
-  { key: 'tips', label: 'tips\\,$\\uparrow$', digits: 1, better: 'max' },
-  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: 'min' },
-  { key: 'cot', label: 'CoT\\,$\\downarrow$', digits: 1, better: 'min' },
-  { key: 'success', label: 'Succ.\\ (\\%)', digits: 0, better: 'max', scale: 100, showStd: false }
-], { caption: 'Ablation of the SGT gait and of the physics core (Level 1, 20\\,s, 3 seeds).', label: 'tab:ablation' })
-  .replace('Method &', 'Variant &');
+  { key: 'speed', label: 'Speed $\\bar v$\\,$\\uparrow$ (m/s)', digits: 3, better: 'max' },
+  { key: 'tips', label: 'Tips\\,$\\uparrow$', digits: 1, better: 'max' },
+  { key: 'rmse', label: 'RMSE\\,$\\downarrow$ (m)', digits: 3, better: 'min' },
+  { key: 'cot', label: 'CoT\\,$\\downarrow$ (--)', digits: 1, better: 'min' },
+  { key: 'success', label: 'Success\\,$\\uparrow$ (\\%)', digits: 0, better: 'max', scale: 100, showStd: false }
+], {
+  caption: 'Ablation of SGT and of the physics core (Level 1, 20\\,s, 3 seeds).',
+  label: 'tab:ablation',
+  paper: true,
+  firstHeader: 'Variant',
+  groups: [{ at: 0, label: 'Proposed' }, { at: 1, label: 'Gait ingredients' }, { at: 5, label: 'Physics core' }]
+});
 
 // ---------------------------------------------------------------- Table V generalization
 const genRows = [];
@@ -131,12 +155,18 @@ for (const level of [1, 4, 7]) {
   }
 }
 summary.generalization = genRows;
-const tableV = latexTable(genRows, [
-  { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: null },
-  { key: 'rmse', label: 'RMSE (m)\\,$\\downarrow$', digits: 3, better: null },
-  { key: 'success', label: 'Succ.\\ (\\%)', digits: 0, better: null, scale: 100, showStd: false },
+const tableV = latexTable(genRows.map(r => ({ ...r, label: r.label.replace(/^Level \d+: /, '') })), [
+  { key: 'speed', label: 'Speed $\\bar v$\\,$\\uparrow$ (m/s)', digits: 3, better: null },
+  { key: 'rmse', label: 'RMSE\\,$\\downarrow$ (m)', digits: 3, better: null },
+  { key: 'success', label: 'Success\\,$\\uparrow$ (\\%)', digits: 0, better: null, scale: 100, showStd: false },
   { key: 'maxResidual', label: 'max $|\\varepsilon|$ (J)', digits: 1, better: null, sci: true }
-], { caption: 'Terrain generalization (3 seeds per cell).', label: 'tab:terrain' }).replace('Method &', 'Terrain / method &');
+], {
+  caption: 'Terrain generalization (3 seeds per cell).',
+  label: 'tab:terrain',
+  paper: true,
+  firstHeader: 'Method',
+  groups: [1, 4, 7].map((level, i) => ({ at: 2*i, label: `Level ${level}${level === 1 ? ' (rolling plain)' : level === 4 ? ' (rocky)' : ' (rugged relief)'}` }))
+});
 
 writeFileSync(path.join(outDir, 'tables.tex'), [tableI, tableII, tableIII, tableIV, tableV].join('\n\n')+'\n');
 // One file per table, so the paper can place each one where it is discussed.

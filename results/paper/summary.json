@@ -972,6 +972,7 @@
   "stress": [
     {
       "label": "Nominal",
+      "scenario": "nominal",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1002,7 +1003,8 @@
       }
     },
     {
-      "label": "Lateral impulse 0.5 m/s",
+      "label": "Lateral impulse 0.5\\,m/s",
+      "scenario": "impulse",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1033,7 +1035,8 @@
       }
     },
     {
-      "label": "Step push 10 N, 2 s",
+      "label": "Push 10\\,N for 2\\,s",
+      "scenario": "push",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1064,7 +1067,8 @@
       }
     },
     {
-      "label": "Gaussian sensor noise",
+      "label": "Gaussian",
+      "scenario": "gaussian",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1095,7 +1099,8 @@
       }
     },
     {
-      "label": "Laplace sensor noise",
+      "label": "Laplace",
+      "scenario": "laplace",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1126,7 +1131,8 @@
       }
     },
     {
-      "label": "Sensor outliers (2 %, 10x)",
+      "label": "Outliers (2\\,\\%, $10\\times$)",
+      "scenario": "outlier",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1157,7 +1163,8 @@
       }
     },
     {
-      "label": "Cable stiffness -20 %",
+      "label": "Cable stiffness $-20$\\,\\%",
+      "scenario": "stiffness",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1188,7 +1195,8 @@
       }
     },
     {
-      "label": "Friction -40 %",
+      "label": "Friction $-40$\\,\\%",
+      "scenario": "friction",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1219,7 +1227,8 @@
       }
     },
     {
-      "label": "Payload mass +30 %",
+      "label": "Payload mass $+30$\\,\\%",
+      "scenario": "payload",
       "n": 3,
       "cells": {
         "sgtSpeed": {
@@ -1250,7 +1259,8 @@
       }
     },
     {
-      "label": "Actuator delay 100 ms",
+      "label": "Delay 100\\,ms",
+      "scenario": "delay",
       "n": 3,
       "cells": {
         "sgtSpeed": {

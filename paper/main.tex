@@ -35,6 +35,9 @@
 \newcommand{\todo}[1]{\textcolor[rgb]{0.85,0,0}{[TODO: #1]}}
 \newcommand{\remark}[1]{\noindent\textbf{Remark #1.}\ }
 \newcommand{\coderepo}{\url{https://github.com/kapildev1012/3d}}
+\newtheorem{proposition}{Proposition}
+\DeclareMathOperator{\clip}{clip}
+\DeclareMathOperator{\diag}{diag}
 
 % Teaser figure under the author block (first page)
 \makeatletter
@@ -60,11 +63,11 @@
 \title{Sensitivity-Gradient Tipping, MPC-Guided Policy Search and Suspension
 Integrity for Cable-Only Locomotion of a Six-Bar Tensegrity Rover}
 
-\author{\todo{First Author}$^{1}$ and \todo{Second Author}$^{2}$%
+\author{Ruchika Bhardwaj$^{1}$ and Kapil Dev$^{2}$%
 \thanks{\todo{Funding acknowledgement.}}%
-\thanks{$^{1}$\todo{Department, Institution, City, Country.}}%
-\thanks{$^{2}$\todo{Department, Institution, City, Country.}}%
-\thanks{Corresponding author: \todo{email}.}}
+\thanks{$^{1}$Ruchika Bhardwaj is with \todo{Department, Institution, City, Country}.}%
+\thanks{$^{2}$Kapil Dev is with \todo{Department, Institution, City, Country}.}%
+\thanks{Corresponding author: Ruchika Bhardwaj, \todo{email}.}}
 
 \maketitle
 
@@ -170,8 +173,12 @@ $\vect b_k=\vect q_j-\vect q_i$, with Jacobian $\vect R_q$.
 
 \subsection{Equations of Motion and Correction}
 With $\vect F$ collecting gravity, cable, damping, contact and payload
-forces, the index-1 form of $\vect M\ddot{\vect q}=\vect F+\vect R_q^\top\vect\lambda$
-gives the multipliers in closed form,
+forces, the dynamics are $\vect M\ddot{\vect q}=\vect F+\vect R_q^\top\vect\lambda$
+with $\vect R(\vect q)=\vect 0$. Differentiating the constraints twice,
+$\ddot R_k=2(\dot{\vect b}_k^\top\dot{\vect b}_k+\vect b_k^\top\ddot{\vect b}_k)=0$,
+i.e.\ $\vect R_q\ddot{\vect q}+\vect\xi_2=\vect 0$, and substituting
+$\ddot{\vect q}=\vect M^{-1}(\vect F+\vect R_q^\top\vect\lambda)$ gives the
+index-1 multipliers in closed form,
 \begin{equation}
 \vect\lambda=-\big(\vect R_q\vect M^{-1}\vect R_q^\top\big)^{-1}
 \big(\vect\xi_2+\vect R_q\vect M^{-1}\vect F\big),\quad
@@ -205,8 +212,14 @@ $\vect f_t=-\mu\|\vect f_n\|\vect v_t/\sqrt{\|\vect v_t\|^2+\epsilon^2}$.
 No clamps, impulses or velocity projections are used.
 
 \subsection{Work Ledger}
-The ledger stores $E=T+V_g+V_c$ and the trapezoidal work $W_c$ of every
-force category; projections are booked as the energy change they cause.
+The ledger stores the energy
+\begin{equation}
+E(\vect q,\dot{\vect q})=\tfrac12\dot{\vect q}^\top\vect M\dot{\vect q}
+-\textstyle\sum_i m_i\vect g^\top\vect q_i+\sum_{c}\tfrac25 k\,p_c^{5/2}
+\end{equation}
+and, for every force category $c$, the trapezoidal work
+$W_c\mathrel{+}=\tfrac{\Delta t}{2}\vect F_c^\top(\dot{\vect q}_k+\dot{\vect q}_{k+1})$;
+projections are booked as the energy change they cause.
 The certificate and the per-step drift are
 \begin{equation}
 \varepsilon(t)=E(t)-E_0-\textstyle\sum_c W_c(t),\qquad
@@ -214,8 +227,28 @@ The certificate and the per-step drift are
 \end{equation}
 where $\varepsilon_k^{-}$ is the residual before the energy row is
 applied: $\delta_k$ is the energy that step $k$ created or destroyed
-without a booked cause. For a correct model it is discretization error
-and shrinks with $\Delta t$; an unbooked force would not. We also report
+without a booked cause.
+
+\begin{proposition}[First-order drift]\label{prop:drift}
+Let all forces be booked and Lipschitz along the trajectory, and let the
+semi-implicit Euler step have local error $O(\Delta t^2)$. Then
+$\delta_k=O(\Delta t^2)$ and $\sum_{k\le T/\Delta t}|\delta_k|=O(\Delta t)$.
+An unbooked force $\vect f_u$ instead contributes
+$\sum_k|\delta_k|\to\int_0^T|\vect f_u^\top\dot{\vect q}|\,dt\neq0$ as
+$\Delta t\to0$.
+\end{proposition}
+\begin{IEEEproof}
+Along the exact flow $\dot E=\sum_c\vect F_c^\top\dot{\vect q}$, so the
+exact increment equals the exact work. The trapezoidal work is exact up
+to $O(\Delta t^3)$ for smooth integrands, and $E$ evaluated at the
+numerical state differs from its exact value by the local error times
+$\nabla E$, i.e.\ $O(\Delta t^2)$. Summing $T/\Delta t$ steps gives
+$O(\Delta t)$. An unbooked power $\vect f_u^\top\dot{\vect q}$ is a
+Riemann sum that converges to its integral instead of vanishing.
+\end{IEEEproof}
+
+\noindent Halving $\Delta t$ must therefore halve $\sum_k|\delta_k|$ for
+a correct model; Section~\ref{sec:results} verifies this. We also report
 the numerical work $|W_{\mathrm{num}}|$ of projections and corrector and
 the \emph{aid share} of the energy input supplied by non-physical
 categories. A run is \emph{admissible} if the aid share is zero and
@@ -247,14 +280,49 @@ $P$; axial bar rigidity is a constraint, and a small Tikhonov term keeps
 the system regular. One LU factorization gives the displacement
 sensitivities $\vect X=\partial\vect q/\partial\vect u$ and the COM
 sensitivity $\vect S=\tfrac{1}{m_{\mathrm{tot}}}\sum_i m_i\vect X_i$.
+Equivalently, with $\vect Z$ a basis of $\ker\vect A$ (motions that
+keep the bars rigid and the support pinned),
+\begin{equation}
+\vect X=\vect Z\,\vect K_r^{-1}\vect Z^\top\vect B,\qquad
+\vect K_r=\vect Z^\top\vect K\vect Z,
+\label{eq:nullspace}
+\end{equation}
+where $\vect K_r$ is the reduced stiffness of the admissible motions.
+Writing $\vect K=\vect K_0-\sum_k\tfrac{P_k}{L_k}\vect G_k$ with the
+cable part $\vect K_0$ and the bar projectors
+$\vect G_k\succeq0$ makes the role of the bar compression explicit.
+
+\begin{proposition}[Compression increases compliance]\label{prop:compliance}
+If $\vect K_r(\vect P)\succ0$ and $\vect P\ge\vect 0$, then
+$\vect K_r(\vect P)^{-1}\succeq\vect K_r(\vect 0)^{-1}$; hence for every
+cable command $\delta\vect u$ the compliance
+$\delta\vect u^\top\vect B^\top\vect Z\vect K_r^{-1}\vect Z^\top\vect B\,\delta\vect u$,
+the work of the cable forces on the admissible motion, is at least that
+of the uncompressed structure.
+\end{proposition}
+\begin{IEEEproof}
+$\vect K_r(\vect P)=\vect K_r(\vect 0)-\sum_k\tfrac{P_k}{L_k}\vect Z^\top\vect G_k\vect Z\preceq\vect K_r(\vect 0)$,
+and matrix inversion is operator-antitone on positive-definite matrices.
+\end{IEEEproof}
+
+\noindent Ignoring the geometric term therefore systematically
+underestimates which cables can move the COM; the ablation in
+Section~\ref{sec:results} confirms the consequence.
 
 \subsection{Edge Selection and Command}
 For an edge $e$ of $\mathcal F$ with outward normal $\vect n_e$ and
 midpoint $\vect p_e$, the tipping margin is
 $m_e=-(\vect c-\vect p_e)^\top\vect n_e$ and the gradient of the COM
 shift across it is $\vect g_e=\vect S_{xy}^\top\vect n_e$. Under box
-limits $u_k\in[\underline u_k,\bar u_k]$ the achievable shift is
-$s_e=\sum_k\max(g_{e,k}\bar u_k,g_{e,k}\underline u_k)$. Among edges
+limits $u_k\in[\underline u_k,\bar u_k]$ the largest first-order shift is
+the value of the linear program
+\begin{equation}
+s_e=\max_{\underline{\vect u}\le\vect u\le\bar{\vect u}}\vect g_e^\top\vect u
+=\textstyle\sum_k\max(g_{e,k}\bar u_k,\,g_{e,k}\underline u_k),
+\label{eq:lp}
+\end{equation}
+which is separable, so its solution is a box vertex. The edge tips to
+first order once $m_e-\vect g_e^\top(\vect u-\vect u_0)<0$. Among edges
 aligned with the travel direction ($\vect n_e^\top\vect d\ge0.25$), SGT
 locks for the cycle the edge with the largest reachable margin
 $s_e-m_e$ and commands
@@ -292,14 +360,31 @@ speed times $\Delta t$ ($N=6$, $\Delta t=50$\,ms, $r=1$,
 $r_\Delta=0.2$). The problem is separable per actuator and is solved by
 projected gradient at 20\,Hz.
 
-\remark{1}For $N=1$, $r=1$, $r_\Delta=\lambda=0$ and an inactive rate
-bound, each actuator minimizes $-\hat g_k\tilde u_k+\tfrac12\tilde u_k^2$
-on $[\underline{\tilde u}_k,1]$, whose solution
-$\mathrm{clip}(\hat g_k,\underline{\tilde u}_k,1)$ is the SGT command
-\eqref{eq:sgt}. The teacher thus generalizes SGT with a horizon,
-spool-rate limits and smoothing, and $\lambda>0$ adds the
-policy-proximity term of guided policy search---the quadratic form of
-the KL constraint between fixed-covariance Gaussian policies.
+\begin{proposition}[Teacher and SGT]\label{prop:teacher}
+(i) For $N=1$, $r=1$, $r_\Delta=\lambda=0$ and an inactive rate bound,
+the solution of \eqref{eq:teacher} is the SGT command \eqref{eq:sgt}.
+(ii) In general \eqref{eq:teacher} is separable over actuators and
+$r$-strongly convex in each actuator's trajectory with gradient
+Lipschitz constant $L\le r+4r_\Delta+\lambda$; projected gradient with
+step $1/L$ converges linearly at rate $1-r/L$.
+\end{proposition}
+\begin{IEEEproof}
+(i) Each actuator minimizes $-\hat g_k\tilde u_k+\tfrac12\tilde u_k^2$
+over $[\underline{\tilde u}_k,1]$; the unconstrained minimizer is
+$\hat g_k$ and its projection is $\clip(\hat g_k,\underline{\tilde u}_k,1)$.
+(ii) The Hessian of one actuator's cost is
+$r\vect I+r_\Delta\vect D^\top\vect D+\lambda\vect e_1\vect e_1^\top$ with
+the first-difference matrix $\vect D$, $\|\vect D^\top\vect D\|\le4$; the
+constraints are a closed convex set, and the rate is the standard
+result for strongly convex smooth objectives.
+\end{IEEEproof}
+
+\remark{1}For Gaussian policies with a common covariance $\Sigma$,
+$D_{\mathrm{KL}}\big(\mathcal N(\vect\mu_1,\Sigma)\,\|\,\mathcal N(\vect\mu_2,\Sigma)\big)
+=\tfrac12\|\vect\mu_1-\vect\mu_2\|^2_{\Sigma^{-1}}$, so the term
+$\tfrac\lambda2\|\tilde{\vect u}_1-\pi_\theta\|^2$ is the
+KL-divergence constraint of guided policy search \cite{levine2013guided}
+in Lagrangian form with $\Sigma=\vect I$.
 
 \subsection{Policy Observations}
 The policy $\pi_\theta$ does not use the KKT model. Each outer cable is
@@ -311,8 +396,30 @@ $(\vect e^\top\vect n_e)^2$ and $e_z^2$, current offset and strain, and
 global context (COM velocity, gait state, margin, time in state); the
 payload cables have 19 analogous features. One MLP ($2\times48$ units)
 is shared by all outer cables and one ($2\times36$) by all payload
-cables, so the policy is equivariant to the cable numbering and
-independent of the face the rover rests on.
+cables. Writing $\vect o=(\vect o_1,\dots,\vect o_{24},\vect o^{c}_1,\dots,\vect o^{c}_{12})$
+for the per-cable features, the policy is
+\begin{equation}
+\pi_\theta(\vect o)=\big(f_\theta(\vect o_1),\dots,f_\theta(\vect o_{24}),\,
+f^{c}_\theta(\vect o^{c}_1),\dots,f^{c}_\theta(\vect o^{c}_{12})\big).
+\label{eq:policy}
+\end{equation}
+
+\begin{proposition}[Equivariance]\label{prop:equiv}
+Let $\sigma$ be a symmetry of the six-bar tensegrity that permutes outer
+and payload cables by $\vect P_\sigma$. Because the features are defined
+in the frame of the travel direction and the locked edge, they satisfy
+$\vect o(\sigma\vect q)=\vect P_\sigma\vect o(\vect q)$, and \eqref{eq:policy}
+gives $\pi_\theta(\vect P_\sigma\vect o)=\vect P_\sigma\pi_\theta(\vect o)$.
+\end{proposition}
+\begin{IEEEproof}
+Each output depends only on its own feature vector through a shared
+map, so permuting the inputs permutes the outputs identically.
+\end{IEEEproof}
+
+\noindent The six-bar shell has pyritohedral symmetry (order 24), which
+acts transitively on its 8 closed and on its 12 open triangular faces,
+so one learned map covers all support faces of the same type; a network
+on the concatenated state would have to learn every face separately.
 
 \subsection{Training}
 Starting from $\mathcal D_0$ collected with the unregularized teacher,
@@ -365,28 +472,67 @@ the filter returns
 \end{aligned}
 \label{eq:shield}
 \end{equation}
-where $\vect u_0$ is the current command and $\hat h_c$ is the
+where $\vect u_0$ is the current command and
+$\hat h_c(\vect u)=h_c+\nabla_{\vect u}h_c^\top(\vect u-\vect u_0)$ is the
 first-order prediction of a safety function from $\vect X$. For a cable
-between nodes $i,j$ with stiffness $k$, rest length $l_0$ and direction
-$\vect e$,
-$\hat T(\vect u)=k\big(L-l_0+u_{\mathrm{self}}+\vect e^\top(\vect X_j-\vect X_i)(\vect u-\vect u_0)\big)$.
+$a$ between nodes $i,j$ with stiffness $k$, rest length $l_0-u_a$,
+length $L$ and direction $\vect e$, the tension $T=k(L-l_0+u_a)$ has
+\begin{equation}
+\frac{\partial T}{\partial u_b}=k\Big(\vect e^\top\big(\vect X_{j,b}-\vect X_{i,b}\big)+\delta_{ab}\Big),
+\label{eq:dT}
+\end{equation}
+the first term from the deformation of the shell and the second from
+the cable's own spool. For the payload at $\vect c$ and rod $(i,j)$ with
+closest point $\vect p(s)=(1-s)\vect q_i+s\vect q_j$ and distance $d$,
+\begin{equation}
+\frac{\partial d}{\partial u_b}=\hat{\vect n}^\top\big(\vect X_{c,b}-(1-s)\vect X_{i,b}-s\vect X_{j,b}\big),
+\quad\hat{\vect n}=\frac{\vect c-\vect p(s)}{d},
+\label{eq:dd}
+\end{equation}
+where $s$ is held fixed because $\partial d/\partial s=0$ at an interior
+minimizer (envelope theorem).
 $\mathcal C$ contains payload-cable tension $T\ge10$\,N, outer-cable
 tension $T\le150$\,N and payload-to-rod clearance $d\ge0.08$\,m (core
 radius 0.05\,m), the latter linearized at the closest point of each rod.
 The barrier condition is the discrete-time form of
-\cite{agrawal2017dcbf}: a satisfied constraint stays satisfied and a
-violated one recovers at rate $\gamma=0.3$ per step. The second
+\cite{agrawal2017dcbf} with $\gamma=0.3$.
+
+\begin{proposition}[Invariance under the prediction]\label{prop:inv}
+If the QP \eqref{eq:shield} is feasible at every step and the next value
+of each safety function equals its prediction, $h_{c,k+1}=\hat h_{c,k}(\vect u^\star_k)$,
+then $h_{c,k}\ge(1-\gamma)^k h_{c,0}$. Hence $h_{c,0}\ge0$ implies
+$h_{c,k}\ge0$ for all $k$, and an initial violation decays at least
+geometrically, $\min(0,h_{c,k})\ge(1-\gamma)^k\min(0,h_{c,0})$.
+\end{proposition}
+\begin{IEEEproof}
+Induction on $h_{c,k+1}=\hat h_{c,k}(\vect u^\star_k)\ge(1-\gamma)h_{c,k}$
+with $0<1-\gamma<1$.
+\end{IEEEproof} The second
 constraint preserves the predicted COM shift: without it the filter
 cancels the payload-cable slackening that SGT uses to tip; with it the
 tipping effort is re-routed, mainly to the leading payload cables. It
 is dropped if it conflicts with the barriers. $\vect W$ weights outer
-cables ten times more than payload cables, and the QP is solved by
-accelerated projected gradient on the dual \cite{beck2009fista} with the
-box exact in the primal.
+cables ten times more than payload cables. Writing the inequality rows
+of \eqref{eq:shield} as $\vect G\vect u\ge\vect h$, the QP is strongly
+convex, so its solution is unique, and for diagonal $\vect W$ the
+Lagrangian is minimized over the box in closed form:
+\begin{subequations}\label{eq:dual}
+\begin{align}
+\vect u(\vect\nu)&=\clip\big(\vect u_{\mathrm{nom}}+\vect W^{-1}\vect G^\top\vect\nu,\ \underline{\vect u},\ \bar{\vect u}\big),\\
+\nabla\varphi(\vect\nu)&=\vect h-\vect G\vect u(\vect\nu),\qquad
+L_\varphi=\lambda_{\max}\big(\vect G\vect W^{-1}\vect G^\top\big),
+\end{align}
+\end{subequations}
+for the concave dual $\varphi$ with multipliers $\vect\nu\ge\vect 0$. We
+maximize $\varphi$ by projected gradient with Nesterov momentum (FISTA
+\cite{beck2009fista}, $O(1/k^2)$ in the dual), with rows scaled to unit
+$\vect W^{-1}$-norm.
 
-\remark{2}The conditions hold for the quasi-static prediction $\hat h$.
-Tumbling and impacts are inertial events that this prediction does not
-contain, so the closed-loop results of Section~\ref{sec:res-shield} are
+\remark{2}Proposition~\ref{prop:inv} holds for the quasi-static
+prediction $\hat h$. The prediction error
+$h_{c,k+1}-\hat h_{c,k}(\vect u^\star_k)$ is small during quasi-static
+shifting but not during tumbling and impacts, which are inertial; the
+closed-loop results of Section~\ref{sec:res-shield} are therefore
 empirical, and we report where they fail.
 
 % ---------------------------------------------------------------------
@@ -482,7 +628,7 @@ filter restores the suspension at unchanged progress (\shProgOffGps\ vs.\
 \shFilteredRuns\ filtered runs the payload came closer than 0.08\,m to
 a rod (minimum \shClearMin\,m), in \shOuterViol\ runs an outer cable
 exceeded 150\,N, and the 99th-percentile payload acceleration of SGT
-increased---the inertial events excluded by Remark~2. The filter adds
+increased---the inertial events excluded by Remark~2 (prediction error). The filter adds
 \shMs\,ms per control step.
 
 % ---------------------------------------------------------------------

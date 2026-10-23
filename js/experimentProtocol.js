@@ -221,7 +221,8 @@ export function aggregate(runs, keyOf) {
  * booktabs LaTeX table. columns: [{ key, label, digits, better: 'max'|'min'|null, scale }]
  * Bold marks the best mean per column among rows flagged comparable.
  */
-export function latexTable(rows, columns, { caption = '', label = '', note = '', wide = false } = {}) {
+export function latexTable(rows, columns, { caption = '', label = '', note = '', wide = false, paper = false, groups = [], firstHeader = 'Method' } = {}) {
+  if (paper) return latexTablePaper(rows, columns, { caption, label, note, wide, groups, firstHeader });
   // wide: two-column float (table*) for IEEE double-column layouts
   const fmt = (value, digits, sci = false) => {
     if (!Number.isFinite(value)) return '--';
@@ -265,6 +266,70 @@ export function latexTable(rows, columns, { caption = '', label = '', note = '',
   }
   lines.push('\\bottomrule', '\\end{tabular}', '\\end{adjustbox}');
   if (note) lines.push(`\\\\[2pt]\\parbox{${wide ? '\\textwidth' : '\\columnwidth'}}{\\scriptsize ${note}}`);
+  lines.push(`\\end{${env}}`);
+  return lines.join('\n');
+}
+
+
+/**
+ * Paper layout: two-line headers (metric + arrow / unit), standard deviation
+ * in smaller type, optional group rows, best values in bold, table notes.
+ */
+function latexTablePaper(rows, columns, { caption, label, note, wide, groups, firstHeader }) {
+  const fmt = (value, digits, sci = false) => {
+    if (!Number.isFinite(value)) return '--';
+    if (!sci) {
+      const text = value.toFixed(digits);
+      if (/^-0?\.?0*$/.test(text)) return text.slice(1);          // "-0.000" -> "0.000"
+      return text.startsWith('-') ? `$-$${text.slice(1)}` : text;  // typeset minus sign
+    }
+    const [mantissa, exponent] = value.toExponential(digits).split('e');
+    return `$${mantissa}{\\times}10^{${Number(exponent)}}$`;
+  };
+  const best = {};
+  for (const col of columns) {
+    if (!col.better) continue;
+    const candidates = rows.filter(r => !r.reference).map(r => r.cells[col.key]?.mean).filter(Number.isFinite);
+    if (candidates.length > 1 && Math.max(...candidates)-Math.min(...candidates) > 1e-12) {
+      best[col.key] = col.better === 'max' ? Math.max(...candidates) : Math.min(...candidates);
+    }
+  }
+  // split "name (unit) arrow" into "name arrow" / "(unit)"
+  const head = col => {
+    const m = /^(.*?)\s*\(([^()]*)\)(.*)$/.exec(col.label);
+    return m ? [`${m[1]}${m[3]}`, `(${m[2]})`] : [col.label, ''];
+  };
+  const heads = columns.map(head);
+  const env = wide ? 'table*' : 'table';
+  const width = wide ? '\\textwidth' : '\\columnwidth';
+  const lines = [`\\begin{${env}}[t]`, '\\centering', `\\caption{${caption}}`, `\\label{${label}}`,
+    '\\setlength{\\tabcolsep}{3.2pt}', '\\renewcommand{\\arraystretch}{1.08}', '\\footnotesize',
+    `\\begin{adjustbox}{max width=${width}}`,
+    `\\begin{tabular}{@{}l${'c'.repeat(columns.length)}@{}}`, '\\toprule',
+    [firstHeader, ...heads.map(h => h[0])].join(' & ')+' \\\\'];
+  if (heads.some(h => h[1])) lines.push(['', ...heads.map(h => `{\\scriptsize ${h[1]}}`)].join(' & ')+' \\\\');
+  lines.push('\\midrule');
+  rows.forEach((row, index) => {
+    const group = groups.find(g => g.at === index);
+    if (group) {
+      if (index > 0) lines.push('\\addlinespace[2pt]');
+      lines.push(`\\multicolumn{${columns.length+1}}{@{}l}{\\textit{${group.label}}} \\\\`);
+    }
+    const cells = columns.map(col => {
+      const cell = row.cells[col.key];
+      if (!cell || !Number.isFinite(cell.mean)) return '--';
+      const scale = col.scale ?? 1;
+      let main = fmt(cell.mean*scale, col.digits, col.sci);
+      const isBest = !row.reference && Number.isFinite(best[col.key]) && Math.abs(cell.mean-best[col.key]) <= 1e-12*Math.max(1, Math.abs(best[col.key]));
+      if (isBest) main = `\\textbf{${main}}`;
+      const std = cell.std > 0 && col.showStd !== false && !col.sci ? `\\,{\\scriptsize$\\pm$${fmt(cell.std*scale, col.digits)}}` : '';
+      return main+std;
+    });
+    const name = String(row.label).replace(/(^|[^\\])%/g, '$1\\%');
+    lines.push([(groups.length ? '\\quad ' : '')+name, ...cells].join(' & ')+' \\\\');
+  });
+  lines.push('\\bottomrule', '\\end{tabular}', '\\end{adjustbox}');
+  if (note) lines.push(`\\par\\vspace{3pt}\\parbox{${width}}{\\scriptsize\\raggedright ${note}}`);
   lines.push(`\\end{${env}}`);
   return lines.join('\n');
 }
