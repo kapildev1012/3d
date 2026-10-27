@@ -105,6 +105,7 @@ export class ResidualEnv {
     this.x0 = c[0]; this.y0 = c[1];
     this.maxErr = 0; this.prevMargin = 0; this.prevEnergy = 0; this.cumUtu = 0;
     this.duPrev.fill(0); this.eps.fill(0); this.tickCount = 0;
+    this.ep = { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: this.sim.t };   // whole-episode stats (training digests)
     this.observe(this.lastObs);
     this.tel.fill(0);
     return this;
@@ -204,7 +205,27 @@ export class ResidualEnv {
     }
     tel[TEL.duSq] = d2/(ACT_DIM*rho*rho);
     tel[TEL.dduSq] = dd/(ACT_DIM*4*rho*rho);
+    if (this.ep) {
+      this.ep.n++; this.ep.slack += tel[TEL.slackPct]; this.ep.slip += tel[TEL.slip];
+      this.ep.rodMax = Math.max(this.ep.rodMax, tel[TEL.rodMm]); this.ep.e2 += tel[TEL.cross]**2;
+    }
     return tel;
+  }
+
+  /** Digest of everything since reset() (used for training episodes driven tick by tick). */
+  episodeDigest() {
+    const sim = this.sim, ep = this.ep || { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: 0 };
+    const dy = this.centroid()[1]-this.y0, elapsed = Math.max(1e-9, sim.t-ep.t0), n = Math.max(1, ep.n);
+    const totalMass = sim.dynamicNodeMass*sim.rover.nOuter+sim.plantCoreMass;
+    const timing = sim.controllerTiming;
+    return {
+      avgSpeedMs: dy/elapsed, rmseM: Math.sqrt(ep.e2/n), maxErrorM: this.maxErr, recoveryTimeS: NaN,
+      controlEffortUtu: this.cumUtu, costOfTransport: dy > 0.05 ? sim.metrics.energyCost/(totalMass*Math.abs(sim.cfg.gravity[2])*dy) : NaN,
+      solveTimeMs: timing.count ? timing.totalMs/timing.count : NaN, successRatePct: NaN,
+      rodResidualMm: ep.rodMax, relaxedCablesPct: ep.slack/n, contactSlipMs: ep.slip/n,
+      energyDriftJ: sim.currentDiag?.energyLedger?.maxAbsResidual ?? NaN, progressM: dy,
+      tips: sim.sgt?.tipCount ?? 0, aborts: sim.sgt?.abortCount ?? 0, maxOuterTensionN: this.maxOuterTension || 0
+    };
   }
 
   reward() { return stageReward(this.tel, this.params); }
@@ -220,7 +241,7 @@ export class ResidualEnv {
     return {
       sim: serializeState(this.sim),
       env: { maxErr: this.maxErr, prevMargin: this.prevMargin, cumUtu: this.cumUtu, tickCount: this.tickCount,
-        duPrev: Array.from(this.duPrev), maxOuterTension: this.maxOuterTension || 0, x0: this.x0, y0: this.y0 }
+        duPrev: Array.from(this.duPrev), maxOuterTension: this.maxOuterTension || 0, x0: this.x0, y0: this.y0, ep: this.ep ? { ...this.ep } : null }
     };
   }
   importState(state) {
@@ -228,6 +249,7 @@ export class ResidualEnv {
     const e = state.env;
     this.maxErr = e.maxErr; this.prevMargin = e.prevMargin; this.cumUtu = e.cumUtu; this.tickCount = e.tickCount;
     this.duPrev.set(e.duPrev); this.maxOuterTension = e.maxOuterTension; this.x0 = e.x0; this.y0 = e.y0;
+    if (e.ep) this.ep = { ...e.ep };
     this.eps.fill(0);
     this.observe(this.lastObs);
   }
@@ -237,6 +259,7 @@ export class ResidualEnv {
    * returning the Comparative-benchmark digest for this run.
    */
   runEpisode(duration = 20, { successDistance = 1.0 } = {}) {
+    if (!(duration > 0)) return this.episodeDigest();     // read-out of a tick-by-tick training episode
     const sim = this.sim, scenario = SCENARIOS[this.spec.scenario || 'nominal'];
     const ticks = Math.round(duration/(CONTROL_SUBSTEPS*sim.cfg.dt));
     let impulseDone = false, yBefore = null, recovery = NaN;
