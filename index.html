@@ -674,6 +674,27 @@
         <button type="button" id="hybrid-demo-stop" class="btn" disabled>Stop</button>
       </div>
       <p class="hint" id="hybrid-demo-status" role="status">Idle.</p>
+
+      <h4>Long training · inner MPPI + RL loop, LLM meta-update every batch</h4>
+      <p class="hint">Runs in this tab on Web Workers (keep it open; progress is checkpointed to IndexedDB after every batch and resumes automatically). The API key stays in memory only.</p>
+      <div class="hybrid-train-grid">
+        <label class="field"><span class="field-label">Total episodes</span><input id="mt-total" type="number" min="1" value="100000" class="input exp-input"></label>
+        <label class="field"><span class="field-label">Episodes per LLM batch</span><input id="mt-batch" type="number" min="1" value="500" class="input exp-input"></label>
+        <label class="field"><span class="field-label">Steps per episode (20 Hz)</span><input id="mt-steps" type="number" min="20" value="200" class="input exp-input"></label>
+        <label class="field"><span class="field-label">Workers</span><input id="mt-workers" type="number" min="2" max="9" value="" placeholder="auto" class="input exp-input"></label>
+        <label class="field"><span class="field-label">LLM endpoint (OpenAI-compatible; empty = rule tuner)</span><input id="mt-url" type="url" class="input exp-input" placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"></label>
+        <label class="field"><span class="field-label">Model</span><input id="mt-model" type="text" class="input exp-input" value="gemini-2.5-flash"></label>
+        <label class="field"><span class="field-label">API key</span><input id="mt-key" type="password" class="input exp-input" autocomplete="off" placeholder="not stored"></label>
+      </div>
+      <label class="field"><span class="field-label">Objective (prepended to the co-designer system prompt)</span>
+        <textarea id="mt-prompt" class="input exp-input" rows="2">You are an expert NMPC and Tensegrity Locomotion Tuning Agent. Optimize velocity tracking while keeping relaxed cables under 1% and rod residuals under 0.05mm.</textarea></label>
+      <div class="panel-actions">
+        <button type="button" id="mt-start" class="btn btn-primary">Start long training</button>
+        <button type="button" id="mt-stop" class="btn" disabled>Stop after this episode</button>
+        <button type="button" id="mt-download" class="btn" disabled>Download best checkpoint</button>
+      </div>
+      <p class="hint" id="mt-status" role="status">Idle.</p>
+      <ol id="mt-log" class="hybrid-log"></ol>
     </details>
   </div>
 </section>

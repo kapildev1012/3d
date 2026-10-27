@@ -1750,6 +1750,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Read the shareable URL before the app writes its own state into it.
     const urlState = readUrlState();
     window.app = new App(settings);
+    // Dev-tools entry point: runMassiveTrainingLoop(null, 'objective', 100000, 500, 200, { llm: { apiUrl, apiKey, model } })
+    window.runMassiveTrainingLoop = (...args) => import('./experiments/runMassiveTraining100k.js').then(m => m.runMassiveTrainingLoop(...args));
     window.app.applyUrlState(urlState);
   } catch (error) {
     showGlobalNotice(`Startup failed: ${error.message}`, 'error');

@@ -44,6 +44,7 @@ import { MorphologyActorCritic, synergyMatrix } from '../js/residualMppi.js';
 import { ResidualMppiTrainer, evaluateSpecs, aggregateDigests, stressMatrix, STRESS_SCENARIOS } from '../js/mppiPlanner.js';
 import { LlmMpcCoDesigner, DEFAULT_MPC, DEFAULT_REWARD, toParams, promptRow, loadDotEnv } from '../js/llmMpcOptimizer.js';
 import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
+import { trainSpec, freshInner, accumulateInner, innerSummary } from '../js/trainingLoop.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -79,14 +80,7 @@ const matrix = matrixKind === 'full'
   ? stressMatrix({ seeds })
   : stressMatrix({ levels: [1, 4], scenarios: ['nominal', 'push', 'friction', 'delay'], seeds });
 // Domain randomisation for the inner loop: levels 1-13 (solid obstacles on every level) x
-// stress scenarios x seeds, drawn deterministically per (round, episode).
-const TRAIN_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13];
-const TRAIN_SCENARIOS = ['nominal', 'nominal', 'push', 'gaussian', 'laplace', 'outlier', 'stiffness', 'friction', 'payload', 'delay'];
-const trainSpec = (round, episode) => {
-  let h = (round*7919+episode*104729+12345) >>> 0;
-  const next = () => { h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return h; };
-  return { level: TRAIN_LEVELS[next() % TRAIN_LEVELS.length], scenario: TRAIN_SCENARIOS[next() % TRAIN_SCENARIOS.length], seed: 1000+(next() % 100000) };
-};
+// stress scenarios x seeds, drawn deterministically per (round, episode) - js/trainingLoop.js.
 
 const cfg0 = new SimConfig({});
 const rover = new SphericalRoverModel(cfg0);
@@ -135,22 +129,6 @@ if (epochStart === 0) {
   log(`epoch 0 (untrained actor = SGT-0.120): composite ${entry.composite.toFixed(2)}, completion ${entry.safety.completion.toFixed(0)}%`);
 }
 
-/** Aggregated failure modes of a round's training episodes (fed to the LLM meta-controller). */
-function innerSummary(inner) {
-  const n = Math.max(1, inner.episodes);
-  return {
-    episodes: inner.episodes, realPhysicsSteps: inner.realSteps, rolloutPhysicsSteps: inner.rolloutSteps,
-    successRatePct: 100*inner.success/n, meanProgressM: inner.progress/n, meanSpeedMs: inner.speed/n,
-    meanRelaxedCablesPct: inner.slack/n, maxRodResidualMm: inner.rodMax, meanSlipMs: inner.slip/n,
-    maxOuterTensionN: inner.maxOuter, overloadEpisodes: inner.overload, aborts: inner.aborts, tips: inner.tips,
-    meanEss: inner.ess/n, meanAdvantagePerPlan: inner.advantage/n, meanReturnPerPlan: inner.ret/n,
-    byLevel: Object.fromEntries(Object.entries(inner.byLevel).map(([k, v]) => [k, { episodes: v.n, successRatePct: 100*v.s/v.n, meanProgressM: v.p/v.n }])),
-    byScenario: Object.fromEntries(Object.entries(inner.byScenario).map(([k, v]) => [k, { episodes: v.n, successRatePct: 100*v.s/v.n, meanProgressM: v.p/v.n }]))
-  };
-}
-const freshInner = () => ({ episodes: 0, realSteps: 0, rolloutSteps: 0, success: 0, progress: 0, speed: 0, slack: 0, rodMax: 0, slip: 0,
-  maxOuter: 0, overload: 0, aborts: 0, tips: 0, ess: 0, advantage: 0, ret: 0, byLevel: {}, byScenario: {} });
-
 const trainer = new ResidualMppiTrainer(pool, model, { horizon: Math.round(mpc.horizonSteps), seed: 100+epochStart });
 const saveState = (nextEpoch, nextEpisode, inner) => writeFileSync(statePath, JSON.stringify({
   nextEpoch, nextEpisode, inner, mpc, reward, model: model.toJSON(),
@@ -168,19 +146,7 @@ for (let epoch = Math.max(1, epochStart); epoch <= epochs; epoch++) {
   for (; e < trainEpisodes || inner.realSteps < minInnerSteps; e++) {
     const spec = trainSpec(epoch, e);
     const r = await trainer.runEpisode(spec, trainDuration);
-    const d = r.digest;
-    const real = r.ticks*25;
-    inner.episodes++; inner.realSteps += real; inner.rolloutSteps += real*(K-1);
-    const ok = d.progressM >= 1.0*trainDuration/20 ? 1 : 0;          // same pace as >= 1 m in 20 s
-    inner.success += ok; inner.progress += d.progressM; inner.speed += d.avgSpeedMs;
-    inner.slack += d.relaxedCablesPct || 0; inner.rodMax = Math.max(inner.rodMax, d.rodResidualMm || 0); inner.slip += d.contactSlipMs || 0;
-    inner.maxOuter = Math.max(inner.maxOuter, d.maxOuterTensionN || 0); inner.overload += (d.maxOuterTensionN || 0) > 180 ? 1 : 0;
-    inner.aborts += d.aborts || 0; inner.tips += d.tips || 0;
-    inner.ess += r.meanEss; inner.advantage += r.meanAdvantage; inner.ret += r.meanReturn;
-    for (const [bucket, key] of [[inner.byLevel, `L${spec.level}`], [inner.byScenario, spec.scenario]]) {
-      const b = bucket[key] || (bucket[key] = { n: 0, s: 0, p: 0 });
-      b.n++; b.s += ok; b.p += d.progressM;
-    }
+    accumulateInner(inner, spec, r, { candidates: K, durationS: trainDuration });
     if ((e+1) % checkpointEvery === 0 || e+1 === trainEpisodes) {
       const rate = (inner.realSteps+inner.rolloutSteps)/Math.max(1e-3, (Date.now()-roundStart)/1000);
       log(`round ${epoch} episode ${e+1}/${trainEpisodes}: real steps ${inner.realSteps.toLocaleString()}, rollout steps ${inner.rolloutSteps.toLocaleString()} (${Math.round(rate).toLocaleString()} steps/s), success ${(100*inner.success/inner.episodes).toFixed(0)}%, mean progress ${(inner.progress/inner.episodes).toFixed(2)} m, ESS ${(inner.ess/inner.episodes).toFixed(1)} (${minutes()} min)`);

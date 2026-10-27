@@ -35,6 +35,62 @@ export class HybridPanel {
     this.stopButton?.addEventListener('click', () => { this.stop = true; });
     this.renderEnvironment();
     this.load();
+    this.bindLongTraining();
+  }
+
+  /** Long two-loop training (js/experiments/runMassiveTraining100k.js) from the panel. */
+  bindLongTraining() {
+    const $ = id => this.root.querySelector(`#${id}`);
+    const start = $('mt-start'), stop = $('mt-stop'), download = $('mt-download'), status = $('mt-status'), logList = $('mt-log');
+    if (!start) return;
+    start.disabled = !this.canRun;
+    const addLog = text => {
+      const li = document.createElement('li');
+      li.textContent = `${new Date().toLocaleTimeString()} · ${text}`;
+      logList.prepend(li);
+      while (logList.children.length > 60) logList.lastChild.remove();
+    };
+    start.addEventListener('click', async () => {
+      if (this.longRun) return;
+      const num = (id, fallback) => { const v = Number($(id).value); return Number.isFinite(v) && v > 0 ? v : fallback; };
+      const url = $('mt-url').value.trim();
+      const llm = url ? { apiUrl: url, apiKey: $('mt-key').value, model: $('mt-model').value.trim() || 'gemini-2.5-flash' } : null;
+      this.longAbort = new AbortController();
+      start.disabled = true; stop.disabled = false; download.disabled = true;
+      status.textContent = 'Starting workers…';
+      try {
+        const { runMassiveTrainingLoop } = await import('./experiments/runMassiveTraining100k.js');
+        this.longRun = runMassiveTrainingLoop(null, $('mt-prompt').value, num('mt-total', 100000), num('mt-batch', 500), num('mt-steps', 200), {
+          workers: $('mt-workers').value ? num('mt-workers', 4) : undefined, llm, signal: this.longAbort.signal,
+          onProgress: st => {
+            if (st.log) addLog(st.log);
+            if (st.inner) {
+              const eta = st.etaBatchS > 3600 ? `${(st.etaBatchS/3600).toFixed(1)} h` : `${Math.round(st.etaBatchS/60)} min`;
+              status.textContent = `Batch ${st.batch}: episode ${st.episode}/${st.episodesPerBatch} · total ${st.completed.toLocaleString()}/${st.totalTargetEpisodes.toLocaleString()} · `
+                + `${Math.round(st.stepsPerSecond).toLocaleString()} physics steps/s · success ${st.inner.successRatePct.toFixed(0)}% · `
+                + `slack ${st.inner.meanRelaxedCablesPct.toFixed(1)}% · rod ${st.inner.maxRodResidualMm.toFixed(4)} mm · next LLM update in ~${eta}`;
+            }
+          }
+        });
+        this.lastResult = await this.longRun;
+        status.textContent = `${this.lastResult.stopped ? 'Stopped' : 'Finished'}: ${this.lastResult.episodes.toLocaleString()} episodes in ${this.lastResult.minutes.toFixed(1)} min; best batch ${this.lastResult.best?.batch ?? '–'}.`;
+        download.disabled = !this.lastResult.best;
+      } catch (error) {
+        status.textContent = `Long training failed: ${error.message}`;
+      } finally {
+        this.longRun = null; start.disabled = !this.canRun; stop.disabled = true;
+      }
+    });
+    stop.addEventListener('click', () => { this.longAbort?.abort(); status.textContent = 'Stopping after the current episode (state is checkpointed)…'; });
+    download.addEventListener('click', async () => {
+      const { deploymentCheckpoint } = await import('./experiments/runMassiveTraining100k.js');
+      const ckpt = deploymentCheckpoint(this.lastResult);
+      if (!ckpt) return;
+      const blob = new Blob([JSON.stringify(ckpt)], { type: 'application/json' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'residual-mppi-checkpoint.json' });
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      addLog('checkpoint downloaded; install it with: node tools/install_checkpoint.mjs residual-mppi-checkpoint.json');
+    });
   }
 
   renderEnvironment() {
