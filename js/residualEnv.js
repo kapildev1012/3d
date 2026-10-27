@@ -103,7 +103,9 @@ export class ResidualEnv {
     this.actor.M = this.synergy;
     const c = this.centroid();
     this.x0 = c[0]; this.y0 = c[1];
-    this.maxErr = 0; this.prevMargin = 0; this.prevEnergy = 0; this.cumUtu = 0;
+    // Per-episode extrema start from zero (a worker runs many episodes; carrying the peak over
+    // made every later episode look overloaded to the safety / rollback logic).
+    this.maxErr = 0; this.prevMargin = 0; this.prevEnergy = 0; this.cumUtu = 0; this.maxOuterTension = 0;
     this.duPrev.fill(0); this.eps.fill(0); this.tickCount = 0;
     this.ep = { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: this.sim.t };   // whole-episode stats (training digests)
     this.observe(this.lastObs);

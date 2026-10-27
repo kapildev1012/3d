@@ -59,3 +59,15 @@ test('episode digest: all Comparative-benchmark metrics are produced', async () 
     assert.ok(d.rodResidualMm < 0.05, `rod residual ${d.rodResidualMm} mm`);
   } finally { await pool.terminate(); }
 });
+
+test('per-episode peak cable tension resets between episodes on the same environment', async () => {
+  const { ResidualEnv } = await import('../js/residualEnv.js');
+  const env = new ResidualEnv();
+  env.reset({ level: 1, scenario: 'nominal', seed: 1 });
+  for (let k = 0; k < 10; k++) env.tick();
+  env.maxOuterTension = 999;                       // pretend the previous episode spiked
+  env.reset({ level: 1, scenario: 'nominal', seed: 2 });
+  assert.equal(env.maxOuterTension, 0);
+  for (let k = 0; k < 10; k++) env.tick();
+  assert.ok(env.maxOuterTension < 999);
+});
