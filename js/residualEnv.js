@@ -16,6 +16,7 @@ import { METHODS, SCENARIOS } from './experimentProtocol.js';
 import { configureLevel } from './levels.js';
 import { SimConfig, Simulation, TerrainModel, SphericalRoverModel } from './simEngine.js?v=20261027-ob1';
 import { serializeState, deserializeState } from './simSnapshot.js';
+import { travelSign } from './obstacleField.js';
 import {
   OBS_DIM, ACT_DIM, TEL, TEL_DIM, PARAM_IDX, DEFAULT_PARAMS, packParams, SynergyActor, synergyMatrix,
   residualObservation, stageReward
@@ -159,7 +160,7 @@ export class ResidualEnv {
     const tel = this.tel;
     const rho = P[PARAM_IDX.maxResidualStrokeM];
 
-    tel[TEL.vFwd] = (c1[1]-c0[1])/dtc;
+    tel[TEL.vFwd] = travelSign(sim.cfg)*(c1[1]-c0[1])/dtc;     // along the level's travel direction
     tel[TEL.cross] = Math.abs(c1[0]-this.x0);
     this.maxErr = Math.max(this.maxErr, tel[TEL.cross]);
     tel[TEL.maxErr] = this.maxErr;
@@ -168,7 +169,7 @@ export class ResidualEnv {
     for (const u of sim.currentCoreActuationOffsets) uu += u*u;
     tel[TEL.uTu] = uu;
     this.cumUtu += uu*dtc;
-    const dy = c1[1]-this.y0;
+    const dy = travelSign(sim.cfg)*(c1[1]-this.y0);
     const totalMass = sim.dynamicNodeMass*sim.rover.nOuter+sim.plantCoreMass;
     const mg = totalMass*Math.abs(sim.cfg.gravity[2]);
     tel[TEL.cot] = dy > 0.05 ? sim.metrics.energyCost/(mg*dy) : 0;
@@ -218,7 +219,7 @@ export class ResidualEnv {
   /** Digest of everything since reset() (used for training episodes driven tick by tick). */
   episodeDigest() {
     const sim = this.sim, ep = this.ep || { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: 0 };
-    const dy = this.centroid()[1]-this.y0, elapsed = Math.max(1e-9, sim.t-ep.t0), n = Math.max(1, ep.n);
+    const dy = travelSign(sim.cfg)*(this.centroid()[1]-this.y0), elapsed = Math.max(1e-9, sim.t-ep.t0), n = Math.max(1, ep.n);
     const totalMass = sim.dynamicNodeMass*sim.rover.nOuter+sim.plantCoreMass;
     const timing = sim.controllerTiming;
     return {
@@ -281,7 +282,7 @@ export class ResidualEnv {
       if (dEnd !== null && Number.isNaN(recovery) && sim.t >= dEnd && yBefore !== null && cy >= yBefore+0.05) recovery = sim.t-dTime;
       if (tel[TEL.done]) break;
     }
-    const dy = this.centroid()[1]-this.y0;
+    const dy = travelSign(sim.cfg)*(this.centroid()[1]-this.y0);
     const totalMass = sim.dynamicNodeMass*sim.rover.nOuter+sim.plantCoreMass;
     const timing = sim.controllerTiming;
     return {

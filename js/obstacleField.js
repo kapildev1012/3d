@@ -24,6 +24,24 @@
 export const OBSTACLE_KINDS = Object.freeze(['box', 'rock', 'cylinder', 'ramp']);
 export const SPAWN_PAD_RADIUS = 2.5;
 
+/** +1 for levels that roll toward +y, -1 for backward-rolling levels (Level 2: actuationMode 'roll_backward'). */
+export const travelSign = cfg => (cfg?.actuationMode === 'roll_backward' ? -1 : 1);
+
+/**
+ * Mirror a generated field about y = startY (for backward-rolling levels), so the
+ * obstacles lie along the actual direction of travel. Ramps keep rising in the travel
+ * direction (yaw -> pi - yaw); boxes, cylinders and rocks are reflected (yaw -> -yaw,
+ * rock lobes dy -> -dy). Call before anchorObstacleField().
+ */
+export function mirrorObstacleField(field, startY) {
+  for (const o of field) {
+    o.y = 2*startY-o.y;
+    o.yaw = o.kind === 'ramp' ? Math.PI-(o.yaw || 0) : -(o.yaw || 0);
+    if (o.kind === 'rock') for (const lobe of o.lobes) lobe.dy = -lobe.dy;
+  }
+  return field;
+}
+
 /** Per-level obstacle profile: difficulty d in [0, 1] and template weights. */
 export const LEVEL_OBSTACLE_PROFILES = Object.freeze({
   1: { d: 0.15, spacing: 3.2, mix: { crate: 2, rock: 3, roller: 2, ramp: 1, ledge: 1 } },
@@ -155,6 +173,7 @@ export function buildObstacleFieldForLevel(levelId, roughnessRms, seed, course =
   }
   // Spawn pad: drop anything whose footprint reaches into the pad around the start point.
   const kept = field.filter(o => Math.hypot(o.x, o.y - startY) - footprintRadius(o) > pad);
+  if ((course.direction ?? 1) < 0) mirrorObstacleField(kept, startY);
   anchorObstacleField(kept, heightAt, embed);
   kept.sort((a, b) => a.minY - b.minY);           // obstaclesNear() relies on this order
   kept.forEach((o, i) => { o.index = i; });

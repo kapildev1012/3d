@@ -130,3 +130,19 @@ test('tracker: over vs around and bypass violations (Model B only)', () => {
   }
   assert.equal(mergeSummaries({ over: 2, around: 1, retries: 0, total: 3, bypassViolations: 1 }, { over: 1, around: 2, total: 3, pending: 0, bypassViolations: 1 }).over, 3);
 });
+
+test('backward-rolling Level 2: obstacles lie along -y, mirrored ramps still rise in the travel direction, tracker passes toward -y', async () => {
+  const { mirrorObstacleField, travelSign } = await import('../js/obstacleField.js');
+  const cfg = new SimConfig({ seed: 1 }); configureLevel(cfg, 2);
+  assert.equal(travelSign(cfg), -1);
+  const field = new TerrainModel(cfg).obstacleField;
+  assert.ok(field.length > 0 && field.every(o => o.y < -SPAWN_PAD_RADIUS));
+  const ramp = mirrorObstacleField([{ id: 'R', kind: 'ramp', x: 0, y: 5, yaw: 0, hx: 0.5, ly: 0.4, height: 0.15 }], 0);
+  anchorObstacleField(ramp, flat, 0.02);
+  const n = [0, 0, 0];
+  const low = sdf(ramp[0], 0, -5+0.35, 0.03, n), high = sdf(ramp[0], 0, -5-0.35, 0.03, n);
+  assert.ok(high < low, 'the high end of the mirrored ramp faces -y (travel direction)');
+  const t = new FieldObstacleTracker(anchorObstacleField([{ id: 'O1', kind: 'box', role: 'cross', x: 0, y: -5, yaw: 0, hx: 0.2, hy: 0.2, height: 0.08, chamfer: 0.01 }], flat, 0.02), 'adaptive', -1);
+  for (let y = -3; y >= -7; y -= 0.05) t.update({ x: 0, y });
+  assert.equal(t.summary().over, 1);
+});

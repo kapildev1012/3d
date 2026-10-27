@@ -16,9 +16,10 @@
  * cards and Dock tables show both trackers through one code path (mergeSummaries).
  */
 export class FieldObstacleTracker {
-  constructor(field = [], modelType = 'fixed') {
+  constructor(field = [], modelType = 'fixed', direction = 1) {
     this.field = field;
     this.modelType = modelType;
+    this.direction = direction < 0 ? -1 : 1;               // -1: backward-rolling level (passes toward -y)
     this.records = new Map(field.map(o => [o.id, {
       id: o.id, template: o.template, kind: o.kind, role: o.role,
       status: 'pending', topContact: false, footprintPass: false, contacted: false, minLateral: Infinity
@@ -32,13 +33,13 @@ export class FieldObstacleTracker {
       const t = touches?.get(o.id);
       if (t) { rec.contacted = true; if (t.top) rec.topContact = true; }
       const halfWidth = o.kind === 'box' || o.kind === 'ramp' ? o.hx : o.kind === 'cylinder' ? o.halfLength : o.boundR * 0.7;
-      if (y >= o.minY - 0.6 && y <= o.maxY + 0.6) {
+      if (Math.abs(y - o.y) <= o.boundR + 0.6) {
         if (rec.status === 'pending') rec.status = 'engaged';
         const lateral = Math.abs(x - o.x);
         rec.minLateral = Math.min(rec.minLateral, lateral);
         if (lateral <= halfWidth && Math.abs(y - o.y) <= o.boundR) rec.footprintPass = true;
       }
-      if (y > o.maxY + 0.6) rec.status = rec.topContact || rec.footprintPass ? 'over' : 'around';
+      if (this.direction*(y - o.y) > o.boundR + 0.6) rec.status = rec.topContact || rec.footprintPass ? 'over' : 'around';
     }
     return this.summary();
   }

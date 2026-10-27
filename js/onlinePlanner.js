@@ -24,6 +24,7 @@
  */
 import { SimConfig, Simulation } from './simEngine.js?v=20261027-ob1';
 import { serializeState, deserializeState } from './simSnapshot.js';
+import { travelSign } from './obstacleField.js';
 import { OBS_DIM, ACT_DIM, TEL, TEL_DIM, PARAM_IDX, residualObservation, stageReward, sampleNoise, makeRng, packParams, DEFAULT_PARAMS } from './residualMppi.js';
 
 export const CONTROL_SUBSTEPS = 25;                        // 20 Hz control tick
@@ -114,7 +115,7 @@ export class OnlineResidualPlanner {
       this.stats.rolloutTicks++;
       const c1 = centroid(sim), dtc = CONTROL_SUBSTEPS * sim.cfg.dt;
       tel.fill(0);
-      tel[TEL.vFwd] = (c1[1] - c0[1]) / dtc;
+      tel[TEL.vFwd] = travelSign(sim.cfg) * (c1[1] - c0[1]) / dtc;
       tel[TEL.cross] = Math.abs(c1[0] - (this.laneX ?? 0));
       let uu = 0;
       for (const u of sim.currentActuationOffsets) uu += u * u;

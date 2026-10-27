@@ -26,7 +26,7 @@ import {
 import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20261027-ob1';
 import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261027-ob1';
 import { SensitivityTippingController } from './tippingController.js?v=20261027-ob1';
-import { buildObstacleFieldForLevel, anchorObstacleField } from './obstacleField.js?v=20261027-ob1';
+import { buildObstacleFieldForLevel, anchorObstacleField, travelSign } from './obstacleField.js?v=20261027-ob1';
 import { DEFAULT_PARAMS as RESIDUAL_DEFAULT_PARAMS } from './residualMppi.js?v=20261027-ob1';
 import { resolveObstacleContacts } from './obstacleContact.js?v=20261027-ob1';
 import { FieldObstacleTracker, mergeSummaries } from './obstacleTracker.js?v=20261027-ob1';
@@ -1239,14 +1239,15 @@ export class TerrainModel {
     const avoid = [...(this.course?.obstacles || []), ...(this.expeditionObstacles || [])]
       .map(o => ({ y: o.y, halfLength: o.radiusY || 1 }));
     const heightAt = (x, y) => this.eval(x, y).h;
-    const key = `${level}|${cfg.seed}|${startY}|${goalY}|${this.course ? 1 : 0}`;
+    const direction = travelSign(cfg);                   // Level 2 rolls backward: obstacles along -y
+    const key = `${level}|${cfg.seed}|${startY}|${goalY}|${this.course ? 1 : 0}|${direction}`;
     if (this.obstacleField && this.obstacleFieldKey === key) {
       // Same layout, new ground: re-seat the existing obstacles (roughness slider).
       anchorObstacleField(this.obstacleField, heightAt, 0.02+0.5*Math.max(0, cfg.groundRMS || 0));
       return;
     }
     this.obstacleField = buildObstacleFieldForLevel(level, cfg.groundRMS, cfg.seed ?? 1, {
-      startY, goalY, heightAt, avoid, corridorHalfWidth: cfg.pathCorridorHalfWidth || 1.25
+      startY, goalY, heightAt, avoid, corridorHalfWidth: cfg.pathCorridorHalfWidth || 1.25, direction
     });
     this.obstacleFieldKey = key;
   }
@@ -1985,7 +1986,7 @@ export class Simulation {
       : null;
     // Solid obstacle field (all levels): identical list for Model A and Model B.
     this.fieldObstacleTracker = this.terrain.obstacleField?.length
-      ? new FieldObstacleTracker(this.terrain.obstacleField, this.modelType)
+      ? new FieldObstacleTracker(this.terrain.obstacleField, this.modelType, travelSign(this.cfg))
       : null;
     this.lastObstacleContact = null;
     // The Level 14 expedition has no A/B course object, so it gets its own

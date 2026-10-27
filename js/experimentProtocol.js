@@ -175,7 +175,8 @@ export async function runExperiment(spec, { duration = 20, successDistance = 1.0
     if (onChunk && (k+1) % chunkSteps === 0) await onChunk((k+1)/steps);
   }
   const diag = sim.currentDiag;
-  const dy = diag.centroid[1]-y0;
+  // Progress along the level's travel direction (Level 2 rolls backward, toward -y).
+  const dy = (cfg.actuationMode === 'roll_backward' ? -1 : 1)*(diag.centroid[1]-y0);
   const totalMass = sim.dynamicNodeMass*sim.rover.nOuter+sim.plantCoreMass;
   const g = Math.abs(cfg.gravity[2]);
   return {
