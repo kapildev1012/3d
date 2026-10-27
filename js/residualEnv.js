@@ -108,7 +108,8 @@ export class ResidualEnv {
     // made every later episode look overloaded to the safety / rollback logic).
     this.maxErr = 0; this.prevMargin = 0; this.prevEnergy = 0; this.cumUtu = 0; this.maxOuterTension = 0;
     this.duPrev.fill(0); this.eps.fill(0); this.tickCount = 0;
-    this.ep = { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: this.sim.t };   // whole-episode stats (training digests)
+    this.ep = { n: 0, slack: 0, slip: 0, rodMax: 0, e2: 0, t0: this.sim.t };
+    this.diverged = false;   // whole-episode stats (training digests)
     this.observe(this.lastObs);
     this.tel.fill(0);
     return this;
@@ -153,7 +154,17 @@ export class ResidualEnv {
     this.called = false;
     const c0 = this.centroid();
     const energy0 = sim.metrics.energyCost;
-    for (let k = 0; k < CONTROL_SUBSTEPS; k++) sim.step();
+    // Divergence guard: a numerically exploding episode (non-finite state or node
+    // speeds no rolling 1 m shell can reach) ends immediately instead of letting
+    // later steps run away; it is reported as 'diverged' and counted as a failure.
+    if (!this.diverged) {
+      for (let k = 0; k < CONTROL_SUBSTEPS; k++) {
+        sim.step();
+        let bad = !Number.isFinite(sim.q[0][0]);
+        for (const w of sim.v) { if (!(w[0]*w[0]+w[1]*w[1]+w[2]*w[2] <= 3600)) { bad = true; break; } }
+        if (bad) { this.diverged = true; break; }
+      }
+    }
     this.tickCount++;
     const c1 = this.centroid();
     const dtc = CONTROL_SUBSTEPS*sim.cfg.dt;
@@ -196,7 +207,7 @@ export class ResidualEnv {
     for (const [i, j] of sim.rover.bars) clearance = Math.min(clearance, segmentDistance(sim.corePosition, sim.q[i], sim.q[j]));
     tel[TEL.clearance] = clearance;
     tel[TEL.over] = (maxOuter > P[PARAM_IDX.maxCableTensionN] || tel[TEL.rodMm] > P[PARAM_IDX.rodLimitMm]) ? 1 : 0;
-    tel[TEL.done] = sim.metrics.runTerminal ? 1 : 0;
+    tel[TEL.done] = sim.metrics.runTerminal || this.diverged ? 1 : 0;
     this.maxOuterTension = Math.max(this.maxOuterTension || 0, maxOuter);
 
     let dd = 0, d2 = 0;
@@ -228,7 +239,8 @@ export class ResidualEnv {
       solveTimeMs: timing.count ? timing.totalMs/timing.count : NaN, successRatePct: NaN,
       rodResidualMm: ep.rodMax, relaxedCablesPct: ep.slack/n, contactSlipMs: ep.slip/n,
       energyDriftJ: sim.currentDiag?.energyLedger?.maxAbsResidual ?? NaN, progressM: dy,
-      tips: sim.sgt?.tipCount ?? 0, aborts: sim.sgt?.abortCount ?? 0, maxOuterTensionN: this.maxOuterTension || 0
+      tips: sim.sgt?.tipCount ?? 0, aborts: sim.sgt?.abortCount ?? 0, maxOuterTensionN: this.maxOuterTension || 0,
+      diverged: this.diverged ? 1 : 0
     };
   }
 
@@ -291,7 +303,8 @@ export class ResidualEnv {
       solveTimeMs: timing.count ? timing.totalMs/timing.count : NaN, successRatePct: dy >= successDistance ? 100 : 0,
       rodResidualMm: rodMax, relaxedCablesPct: slackSum/Math.max(1, nE), contactSlipMs: slipSum/Math.max(1, nE),
       energyDriftJ: sim.currentDiag?.energyLedger?.maxAbsResidual ?? NaN, progressM: dy,
-      tips: sim.sgt?.tipCount ?? 0, aborts: sim.sgt?.abortCount ?? 0, maxOuterTensionN: this.maxOuterTension || 0
+      tips: sim.sgt?.tipCount ?? 0, aborts: sim.sgt?.abortCount ?? 0, maxOuterTensionN: this.maxOuterTension || 0,
+      diverged: this.diverged ? 1 : 0
     };
   }
 }

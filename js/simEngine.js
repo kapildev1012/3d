@@ -344,6 +344,8 @@ const smoothStep01 = value => {
   const x = clampValue(value, 0, 1);
   return x*x*(3-2*x);
 };
+/** d smoothStep01(u) / du (zero outside [0, 1]). */
+const smoothStep01Slope = value => (value > 0 && value < 1 ? 6*value*(1-value) : 0);
 
 // ── Deterministic gradient (Perlin-style) noise with exact derivatives ──
 // Lattice points carry one of eight fixed unit gradients selected by an
@@ -384,8 +386,14 @@ function perlinOctave(x, y, seed) {
   const sxRow = n10-n00;
   const sxHigh = n11-n01;
   const value = (n00+u*sxRow)+(v*((n01+u*sxHigh)-(n00+u*sxRow)));
-  const dhdx = du*(sxRow+v*(sxHigh-sxRow));
-  const dhdy = dv*((n01+u*sxHigh)-(n00+u*sxRow));
+  // Exact partials: value = n00 + u a + v b + u v c with a = n10-n00, b = n01-n00,
+  // c = n00-n10-n01+n11, where every corner term n_ij = g_ij . (f - corner) also
+  // depends on fx, fy (the former code kept only the du / dv terms).
+  const a = sxRow, b = n01-n00, c = n00-n10-n01+n11;
+  const ax = g10[0]-g00[0], bx = g01[0]-g00[0], cx = g00[0]-g10[0]-g01[0]+g11[0];
+  const ay = g10[1]-g00[1], by = g01[1]-g00[1], cy = g00[1]-g10[1]-g01[1]+g11[1];
+  const dhdx = g00[0]+u*ax+du*a+v*bx+u*v*cx+du*v*c;
+  const dhdy = g00[1]+u*ay+v*by+dv*b+u*v*cy+u*dv*c;
   return { value, dhdx, dhdy };
 }
 
@@ -413,11 +421,13 @@ function fbmNoise(x, y, field) {
 // jagged ridge lines. Smoothed sign keeps the derivative bounded at zero.
 function ridgedFbm(x, y, field) {
   const n = fbmNoise(x, y, field);
-  const softSign = Math.tanh(6*n.value);
+  // d|n| = sign(n) dn (the crest n = 0 is a genuine ridge line; the former tanh
+  // "soft sign" under-stated the slope by up to 50 % near every crest).
+  const sign = Math.sign(n.value);
   return {
     value: 1-Math.abs(n.value),
-    dhdx: -softSign*n.dhdx,
-    dhdy: -softSign*n.dhdy
+    dhdx: -sign*n.dhdx,
+    dhdy: -sign*n.dhdy
   };
 }
 // Ten-centimetre-or-better spacing on the longest one-metre struts prevents
@@ -437,14 +447,25 @@ function evaluateRockOutcrop(rock, x, y) {
   const normalizedRadiusSquared = dx*dx/(rx*rx)+dy*dy/(ry*ry);
   if (normalizedRadiusSquared >= 4) return { h: 0, dhdx: 0, dhdy: 0 };
   // Sharp angular stones use a narrower Gaussian core, which steepens the
-  // contact normals near the crest without breaking C1 continuity.
+  // contact normals near the crest. The Gaussian is tapered to exactly zero
+  // over s = r^2 in [3, 4] (smoothstep window), so every stone is C1 at its
+  // footprint edge; the bare cut-off at s = 4 left a step of e^(-4/falloff)
+  // x height (0.7 % of the stone height, ~1 mm) in the ground.
   const falloff = rock.sharp ? 0.42 : 0.8;
-  const factor = Math.exp(-normalizedRadiusSquared/falloff);
-  const h = rock.h*factor;
+  const s = normalizedRadiusSquared;
+  const base = Math.exp(-s/falloff);
+  let window = 1, windowSlope = 0;
+  if (s > 3) {
+    const u = 4-s;                                   // 1 -> 0 across the taper
+    window = u*u*(3-2*u);
+    windowSlope = -6*u*(1-u);                        // d window / d s
+  }
+  const h = rock.h*base*window;
+  const dhds = rock.h*base*(windowSlope-window/falloff);
   return {
     h,
-    dhdx: h*(-2*dx/(falloff*rx*rx)),
-    dhdy: h*(-2*dy/(falloff*ry*ry))
+    dhdx: dhds*2*dx/(rx*rx),
+    dhdy: dhds*2*dy/(ry*ry)
   };
 }
 
@@ -487,12 +508,12 @@ function evaluateMarsh(marsh, x, y) {
   const dRippleDx = muddiness*0.025*(
     freq*Math.cos(freq*dx+1.7*dy+((marsh.seed||0)*3.1))+
     0.6*(-0.9)*Math.cos(2.3*freq*dy-0.9*dx+((marsh.seed||0)*7.3))
-  )*profile+ripple/Math.max(1e-6,profile)*dProfileDx*0.5;
+  )*profile+ripple/Math.max(1e-6,profile)*dProfileDx;   // product rule (was x0.5)
 
   const dRippleDy = muddiness*0.025*(
     1.7*Math.cos(freq*dx+1.7*dy+((marsh.seed||0)*3.1))+
     0.6*2.3*freq*Math.cos(2.3*freq*dy-0.9*dx+((marsh.seed||0)*7.3))
-  )*profile+ripple/Math.max(1e-6,profile)*dProfileDy*0.5;
+  )*profile+ripple/Math.max(1e-6,profile)*dProfileDy;   // product rule (was x0.5)
 
   return {
     h,
@@ -1448,8 +1469,10 @@ export class TerrainModel {
     // southern half of the open world glass-smooth.
     const roughnessOrigin = this.cfg.terrainLevel === 14
       ? (this.cfg.courseStartY ?? -450)+10 : 1.0;
-    const roughnessScale = Math.min(1.0, Math.max(0.0,
-      (y-roughnessOrigin)/(this.cfg.terrainLevel === 14 ? 10.0 : 2.0)));
+    const roughnessRamp = this.cfg.terrainLevel === 14 ? 10.0 : 2.0;
+    const roughnessScale = Math.min(1.0, Math.max(0.0, (y-roughnessOrigin)/roughnessRamp));
+    // d(roughnessScale)/dy is part of dh/dy (the contact force follows the gradient).
+    const roughnessScaleDy = (y > roughnessOrigin && y < roughnessOrigin+roughnessRamp) ? 1/roughnessRamp : 0;
     for (let i = 0; i < this.modes.length; i++) {
       const { kx, ky, A, phi } = this.modes[i];
       const arg = kx * x + ky * y + phi;
@@ -1458,7 +1481,7 @@ export class TerrainModel {
 
       h += A * cos_arg * roughnessScale;
       dhdx -= A * kx * sin_arg * roughnessScale;
-      dhdy -= A * ky * sin_arg * roughnessScale;
+      dhdy += A * (cos_arg * roughnessScaleDy - ky * sin_arg * roughnessScale);
     }
 
     // Windowed rock lookup: only stones whose footprint can reach this
@@ -1477,7 +1500,9 @@ export class TerrainModel {
       const dy = y - crater.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       const r = crater.r;
-      if (d < 2.5 * r) {
+      // Cut off where the profile is ~1e-11 x depth (at 2.5 r it was still ~8.5e-5 x depth,
+      // i.e. a sub-millimetre step in the ground on deep Level 14 craters).
+      if (d < 4.0 * r) {
         const normD = d / r;
         const profile = -crater.depth * Math.exp(-normD * normD * 1.5) + 0.15 * crater.depth * Math.exp(-Math.pow(normD - 1.1, 2) * 8.0);
         h += profile;
@@ -1524,25 +1549,36 @@ export class TerrainModel {
     // full drama beyond the travel corridor.
     if (this.noiseFields && this.cfg.terrainLevel === 14) {
       const f = this.noiseFields;
-      const laneFade = smoothStep01((Math.abs(x)-1.6)/6.5);
+      // All three layers are products of x/y-dependent factors; every factor's
+      // derivative is included (product rule), so (dhdx, dhdy) is the true
+      // gradient of h. The passive contact force follows this gradient, and a
+      // wrong one injects energy (it blew up Level 14 spawns for some seeds).
+      const fadeArg = (Math.abs(x)-1.6)/6.5;
+      const laneFade = smoothStep01(fadeArg);
+      const laneFadeDx = smoothStep01Slope(fadeArg)*Math.sign(x)/6.5;
 
       // Dunes: plain fBm everywhere.
       const dunes = fbmNoise(x, y, f.dunes);
       h += laneFade*f.dunes.amplitude*dunes.value;
-      dhdx += laneFade*f.dunes.amplitude*dunes.dhdx;
+      dhdx += f.dunes.amplitude*(laneFade*dunes.dhdx+laneFadeDx*dunes.value);
       dhdy += laneFade*f.dunes.amplitude*dunes.dhdy;
 
       // Ridges: ridged fBm gated by a low-frequency mask so they form a
       // sparse jagged network rather than carpeting the map.
       if (laneFade > 1e-6) {
         const ridgeMask = fbmNoise(x*0.35+40.7, y*0.35-13.2, f.ridges);
-        const gate = smoothStep01(1.15*(ridgeMask.value-0.08));
+        const gateArg = 1.15*(ridgeMask.value-0.08);
+        const gate = smoothStep01(gateArg);
+        const gateSlope = smoothStep01Slope(gateArg)*1.15*0.35;
         if (gate > 1e-6) {
           const ridges = ridgedFbm(x, y, f.ridges);
           const ridgeHeight = Math.max(0, ridges.value-0.55)/0.45;
-          h += laneFade*f.ridges.amplitude*gate*Math.pow(ridgeHeight, 1.6);
-          dhdx += laneFade*f.ridges.amplitude*gate*1.6*Math.pow(Math.max(0, ridgeHeight), 0.6)*ridges.dhdx/0.45;
-          dhdy += laneFade*f.ridges.amplitude*gate*1.6*Math.pow(Math.max(0, ridgeHeight), 0.6)*ridges.dhdy/0.45;
+          const shape = Math.pow(ridgeHeight, 1.6);
+          const shapeSlope = ridgeHeight > 0 ? 1.6*Math.pow(ridgeHeight, 0.6)/0.45 : 0;
+          const amp = f.ridges.amplitude;
+          h += laneFade*amp*gate*shape;
+          dhdx += amp*(laneFadeDx*gate*shape+laneFade*gateSlope*ridgeMask.dhdx*shape+laneFade*gate*shapeSlope*ridges.dhdx);
+          dhdy += amp*(laneFade*gateSlope*ridgeMask.dhdy*shape+laneFade*gate*shapeSlope*ridges.dhdy);
         }
       }
 
@@ -1551,6 +1587,7 @@ export class TerrainModel {
       // tread offset so elevation stays continuous into the lane.
       const ledges = fbmNoise(x, y, f.ledges);
       const ledgeAmp = f.ledges.amplitude*(0.25+0.75*laneFade);
+      const ledgeAmpDx = f.ledges.amplitude*0.75*laneFadeDx;
       const terraceLevels = 5;
       const step = (ledgeAmp*2)/terraceLevels;
       const raw = ledgeAmp*ledges.value+ledgeAmp;   // [0, 2·ledgeAmp]
@@ -1560,15 +1597,15 @@ export class TerrainModel {
       const edge = smoothStep01((lt-0.82)/0.18);   // last 18% = drop-off
       const terraceH = (li+edge)*step-ledgeAmp;
       h += terraceH;
-      // Derivative: flat on the tread, steep through the scarp. The scarp
-      // slope direction follows the underlying ledge field gradient.
-      const dEdge = lt > 0.82 && lt < 1
-        ? (6*((lt-0.82)/0.18)*(1-(lt-0.82)/0.18))/0.18 : 0;
-      const gradMag = Math.hypot(ledges.dhdx, ledges.dhdy) || 1;
-      const dirX = ledges.dhdx/gradMag;
-      const dirY = ledges.dhdy/gradMag;
-      dhdx += dEdge*step*dirX;
-      dhdy += dEdge*step*dirY;
+      // Exact derivative. level = raw/step = 2.5 (ledges.value + 1) does not depend
+      // on ledgeAmp, so terraceH = ledgeAmp (0.4 (li + edge) - 1) and
+      //   dterraceH = dledgeAmp (0.4 (li + edge) - 1) + ledgeAmp dEdge/dlt d(ledges.value)
+      // (0.4 x 2.5 = 1). The former code used a unit direction times the scarp
+      // height, overstating the scarp slope ~10x where the ledge field is slow.
+      const inRange = level > 0 && level < terraceLevels;
+      const dEdge = inRange ? smoothStep01Slope((lt-0.82)/0.18)/0.18 : 0;
+      dhdx += ledgeAmpDx*(0.4*(li+edge)-1)+ledgeAmp*dEdge*ledges.dhdx;
+      dhdy += ledgeAmp*dEdge*ledges.dhdy;
     }
 
     // Valley/canyon depressions
@@ -1664,6 +1701,10 @@ export class TerrainModel {
     const midX = 0.5*(positionA[0]+positionB[0]);
     const midY = 0.5*(positionA[1]+positionB[1]);
     const halfLength = 0.5*Math.sqrt(planarLengthSquared);
+    // No rover member is longer than ~1.2 m. A longer (or non-finite) segment means the
+    // state has already diverged; querying every stone along it would stall the step
+    // (O(stones) per member on the 22k-stone Level 14 map), so keep the fixed samples.
+    if (!(halfLength < 2.5)) return parameters;
     const features = [
       ...(this.course?.obstacles || []),
       ...(this.expeditionObstacles || []),

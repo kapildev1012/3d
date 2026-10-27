@@ -29,7 +29,7 @@ export function trainSpec(round, episode) {
 }
 
 export const freshInner = () => ({ episodes: 0, realSteps: 0, rolloutSteps: 0, success: 0, progress: 0, speed: 0, slack: 0, rodMax: 0, slip: 0,
-  maxOuter: 0, overload: 0, aborts: 0, tips: 0, ess: 0, advantage: 0, ret: 0, byLevel: {}, byScenario: {} });
+  maxOuter: 0, overload: 0, aborts: 0, tips: 0, diverged: 0, ess: 0, advantage: 0, ret: 0, byLevel: {}, byScenario: {} });
 
 /**
  * Add one finished episode (ResidualMppiTrainer.runEpisode result) to the round's
@@ -43,7 +43,7 @@ export function accumulateInner(inner, spec, result, { candidates, durationS }) 
   inner.success += ok; inner.progress += d.progressM; inner.speed += d.avgSpeedMs;
   inner.slack += d.relaxedCablesPct || 0; inner.rodMax = Math.max(inner.rodMax, d.rodResidualMm || 0); inner.slip += d.contactSlipMs || 0;
   inner.maxOuter = Math.max(inner.maxOuter, d.maxOuterTensionN || 0); inner.overload += (d.maxOuterTensionN || 0) > 180 ? 1 : 0;
-  inner.aborts += d.aborts || 0; inner.tips += d.tips || 0;
+  inner.aborts += d.aborts || 0; inner.tips += d.tips || 0; inner.diverged = (inner.diverged || 0)+(d.diverged ? 1 : 0);
   inner.ess += result.meanEss || 0; inner.advantage += result.meanAdvantage || 0; inner.ret += result.meanReturn || 0;
   for (const [bucket, key] of [[inner.byLevel, `L${spec.level}`], [inner.byScenario, spec.scenario]]) {
     const b = bucket[key] || (bucket[key] = { n: 0, s: 0, p: 0 });
@@ -60,7 +60,7 @@ export function innerSummary(inner) {
     episodes: inner.episodes, realPhysicsSteps: inner.realSteps, rolloutPhysicsSteps: inner.rolloutSteps,
     successRatePct: 100 * inner.success / n, meanProgressM: inner.progress / n, meanSpeedMs: inner.speed / n,
     meanRelaxedCablesPct: inner.slack / n, maxRodResidualMm: inner.rodMax, meanSlipMs: inner.slip / n,
-    maxOuterTensionN: inner.maxOuter, overloadEpisodes: inner.overload, aborts: inner.aborts, tips: inner.tips,
+    maxOuterTensionN: inner.maxOuter, overloadEpisodes: inner.overload, aborts: inner.aborts, tips: inner.tips, divergedEpisodes: inner.diverged || 0,
     meanEss: inner.ess / n, meanAdvantagePerPlan: inner.advantage / n, meanReturnPerPlan: inner.ret / n,
     byLevel: table(inner.byLevel), byScenario: table(inner.byScenario)
   };

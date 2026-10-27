@@ -146,3 +146,23 @@ test('backward-rolling Level 2: obstacles lie along -y, mirrored ramps still ris
   for (let y = -3; y >= -7; y -= 0.05) t.update({ x: 0, y });
   assert.equal(t.summary().over, 1);
 });
+
+test('terrain gradient (dhdx, dhdy) equals the finite-difference gradient on all 14 levels (contact force direction)', () => {
+  for (let level = 1; level <= 14; level++) {
+    for (const seed of [1, 89997]) {
+      const cfg = new SimConfig({ seed }); configureLevel(cfg, level); cfg.seed = seed; cfg.obstacleField = false;
+      const t = new TerrainModel(cfg);
+      const y0 = (cfg.abCourseEnabled || level === 14) ? cfg.courseStartY-1 : 0;
+      let a = 7 + level;
+      const rnd = () => { a = (a * 16807) % 2147483647; return a / 2147483647; };
+      for (let k = 0; k < 300; k++) {
+        const x = (rnd()-0.5)*2.6, y = y0+rnd()*40, h = 1e-5;
+        const fx = (t.eval(x+h, y).h-t.eval(x-h, y).h)/(2*h), fx2 = (t.eval(x+2*h, y).h-t.eval(x-2*h, y).h)/(4*h);
+        if (Math.abs(fx-fx2) > 1e-3) continue;                 // kink (ridge crest / clamp): no derivative
+        const fy = (t.eval(x, y+h).h-t.eval(x, y-h).h)/(2*h);
+        const s = t.eval(x, y);
+        assert.ok(Math.hypot(s.dhdx-fx, s.dhdy-fy) < 2e-3, `L${level} seed ${seed} at (${x.toFixed(2)}, ${(y-y0).toFixed(2)}): analytic (${s.dhdx}, ${s.dhdy}) vs fd (${fx}, ${fy})`);
+      }
+    }
+  }
+});

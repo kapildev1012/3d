@@ -39,7 +39,8 @@ import { OBS_DIM, ACT_DIM, TEL_DIM, MPC_PARAM_DIM, ACTOR_PARAM_COUNT, packParams
 export const CMD = Object.freeze({ IDLE: 0, RESET: 1, STEP: 2, SAVE: 3, RESTORE: 4, PUBLISH: 5, BRANCH: 6, ROLLOUT: 7, EPISODE: 8, EXIT: 9 });
 export const DIGEST_FIELDS = Object.freeze([
   'avgSpeedMs', 'rmseM', 'maxErrorM', 'recoveryTimeS', 'controlEffortUtu', 'costOfTransport', 'solveTimeMs',
-  'successRatePct', 'rodResidualMm', 'relaxedCablesPct', 'contactSlipMs', 'energyDriftJ', 'progressM', 'tips', 'aborts', 'maxOuterTensionN'
+  'successRatePct', 'rodResidualMm', 'relaxedCablesPct', 'contactSlipMs', 'energyDriftJ', 'progressM', 'tips', 'aborts', 'maxOuterTensionN',
+  'diverged'
 ]);
 export const DIGEST_DIM = DIGEST_FIELDS.length;
 export const SPEC_BYTES = 8192;
