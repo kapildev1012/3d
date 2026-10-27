@@ -14,7 +14,7 @@
  * Runs shorter than 0.5 s of simulated time and 1 cm of travel are never
  * stored, so double resets do not create empty records.
  */
-import { newRunId, isMeaningfulRun } from './benchmarkCore.js?v=20261021-ws1';
+import { newRunId, isMeaningfulRun } from './benchmarkCore.js?v=20261027-ob1';
 
 const CHECKPOINT_PERIOD = 1.0; // [s] simulated
 const STALL_WINDOW = 30.0;     // [s] simulated

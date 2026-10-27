@@ -1,4 +1,4 @@
-import { shieldCommand } from './tensionShield.js?v=20261021-ws1';
+import { shieldCommand } from './tensionShield.js?v=20261027-ob1';
 /**
  * TIPPINGCONTROLLER.JS - Sensitivity-Gradient Tipping (SGT) gait
  *

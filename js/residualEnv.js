@@ -14,7 +14,7 @@
  */
 import { METHODS, SCENARIOS } from './experimentProtocol.js';
 import { configureLevel } from './levels.js';
-import { SimConfig, Simulation, TerrainModel, SphericalRoverModel } from './simEngine.js?v=20261021-ws1';
+import { SimConfig, Simulation, TerrainModel, SphericalRoverModel } from './simEngine.js?v=20261027-ob1';
 import { serializeState, deserializeState } from './simSnapshot.js';
 import {
   OBS_DIM, ACT_DIM, TEL, TEL_DIM, PARAM_IDX, DEFAULT_PARAMS, packParams, SynergyActor, synergyMatrix,

@@ -1,6 +1,6 @@
 import { DRIVE_CONTROLLER_LABELS } from './reference/controllerAlgorithms.js';
 import { attachDriveControllerSuite } from './reference/simulationControllerAdapter.js';
-import { Simulation, SimConfig, SphericalRoverModel, TerrainModel } from './simEngine.js?v=20261021-ws1';
+import { Simulation, SimConfig, SphericalRoverModel, TerrainModel } from './simEngine.js?v=20261027-ob1';
 
 // DRIVE_CONTROLLER_LABELS is frozen; keep the hybrid label locally instead of
 // mutating it (the old assignment threw "object is not extensible" in strict

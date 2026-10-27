@@ -27,7 +27,7 @@ import { SharedVecTensegrityEnv } from '../js/parallelPool.js';
 import { MorphologyActorCritic, synergyMatrix } from '../js/residualMppi.js';
 import { ResidualMppiTrainer, evaluateSpecs, aggregateDigests, stressMatrix, STRESS_SCENARIOS } from '../js/mppiPlanner.js';
 import { LlmMpcCoDesigner, DEFAULT_MPC, DEFAULT_REWARD, toParams, promptRow, loadDotEnv } from '../js/llmMpcOptimizer.js';
-import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261021-ws1';
+import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);

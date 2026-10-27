@@ -10,9 +10,9 @@
  * MATLAB conventions (1-based indices), used by tools/tsgfem_validate.mjs to
  * cross-check the port against the original toolbox.
  */
-import { SimConfig, SphericalRoverModel } from './simEngine.js?v=20261021-ws1';
-import { MATERIAL_LIB, analyzeRover } from './tsgfem.js?v=20261021-ws1';
-import { MATERIALS, applyMaterial } from './materials.js?v=20261021-ws1';
+import { SimConfig, SphericalRoverModel } from './simEngine.js?v=20261027-ob1';
+import { MATERIAL_LIB, analyzeRover } from './tsgfem.js?v=20261027-ob1';
+import { MATERIALS, applyMaterial } from './materials.js?v=20261027-ob1';
 
 const HUB_MASS = 0.2, PAYLOAD_MASS = 1.6;
 

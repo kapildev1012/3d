@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SharedVecTensegrityEnv, CMD } from '../js/parallelPool.js';
 import { OBS_DIM, ACT_DIM, TEL, sampleNoise, makeRng, synergyMatrix } from '../js/residualMppi.js';
-import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261021-ws1';
+import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
 
 console.info = () => {};
 const M = synergyMatrix(new SphericalRoverModel(new SimConfig({})));

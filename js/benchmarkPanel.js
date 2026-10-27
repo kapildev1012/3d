@@ -5,8 +5,8 @@
  * for the selected methods x seeds, plots mean +/- 1 sigma bands and builds
  * a booktabs LaTeX table (best values bold, mean +/- std).
  */
-import { METHODS, SCENARIOS, runExperiment, meanStd, latexTable } from './experimentProtocol.js?v=20261021-ws1';
-import { matlabLineOptions, MATLAB_COLORS } from './matlabCharts.js?v=20261021-ws1';
+import { METHODS, SCENARIOS, runExperiment, meanStd, latexTable } from './experimentProtocol.js?v=20261027-ob1';
+import { matlabLineOptions, MATLAB_COLORS } from './matlabCharts.js?v=20261027-ob1';
 
 const COLUMNS = [
   { key: 'speed', label: '$\\bar v$ (m/s)', digits: 3, better: 'max' },

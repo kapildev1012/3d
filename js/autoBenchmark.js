@@ -9,8 +9,8 @@
  * matrix, the history drawer and every storage layer. At the end a report
  * (one row per level) is shown and can be downloaded as JSON or CSV.
  */
-import { primaryMetrics, displayStatus } from './benchmarkCore.js?v=20261021-ws1';
-import { LEVELS } from './levels.js?v=20261021-ws1';
+import { primaryMetrics, displayStatus } from './benchmarkCore.js?v=20261027-ob1';
+import { LEVELS } from './levels.js?v=20261027-ob1';
 
 const SLICE_MS = 30;
 

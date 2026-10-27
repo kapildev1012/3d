@@ -17,7 +17,7 @@
  */
 import {
   emptyState, mergeStates, normalizeRun, normalizeState, migrateLegacyRecords, toCSV
-} from './benchmarkCore.js?v=20261021-ws1';
+} from './benchmarkCore.js?v=20261027-ob1';
 
 export const STORAGE_KEY = 'tensegrity_benchmarks_v2';
 const LEGACY_KEYS = ['tensegrity-experiment-records-v1', 'tensegrity_rover_benchmarks_v1'];

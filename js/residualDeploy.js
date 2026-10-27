@@ -16,10 +16,10 @@
  * trained yet, MPC + RL falls back to the co-designer actor but still runs with
  * the default parameters, so the two modes stay distinct.
  */
-import { MorphologyActorCritic, synergyMatrix, residualPolicyHook, DEFAULT_PARAMS } from './residualMppi.js?v=20261021-ws1';
-import { RESIDUAL_MPPI_WEIGHTS } from './residualMppiWeights.js?v=20261021-ws1';
-import { RESIDUAL_MPPI_WEIGHTS_RL } from './residualMppiWeightsRl.js?v=20261021-ws1';
-import { OnlineResidualPlanner } from './onlinePlanner.js?v=20261021-ws1';
+import { MorphologyActorCritic, synergyMatrix, residualPolicyHook, DEFAULT_PARAMS } from './residualMppi.js?v=20261027-ob1';
+import { RESIDUAL_MPPI_WEIGHTS } from './residualMppiWeights.js?v=20261027-ob1';
+import { RESIDUAL_MPPI_WEIGHTS_RL } from './residualMppiWeightsRl.js?v=20261027-ob1';
+import { OnlineResidualPlanner } from './onlinePlanner.js?v=20261027-ob1';
 
 export const isLlmMode = mode => mode === 'residual_mppi_llm';
 export const isResidualMode = mode => mode === 'residual_mppi' || mode === 'residual_mppi_llm';

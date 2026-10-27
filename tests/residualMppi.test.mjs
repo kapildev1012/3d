@@ -4,7 +4,7 @@ import {
   OBS_DIM, ACT_DIM, SYNERGY_DIM, SynergyActor, ValueNet, TwinCritic, mppiWeights, sampleNoise, makeRng, synergyMatrix,
   packParams, unpackParams, DEFAULT_PARAMS, stageReward, TEL, TEL_DIM, PARAM_IDX, synergyShare
 } from '../js/residualMppi.js';
-import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261021-ws1';
+import { SimConfig, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
 import { SensitivityTippingController } from '../js/tippingController.js';
 
 console.info = () => {};
@@ -157,7 +157,7 @@ test('MPC + RL and MPC + RL + LLM are separate modes: only the LLM mode uses tun
   assert.deepEqual(residualTunedParams('residual_mppi'), {});
   assert.deepEqual(residualCheckpoint('residual_mppi').params, {});
   const { METHODS } = await import('../js/experimentProtocol.js');
-  const { SimConfig: Cfg } = await import('../js/simEngine.js?v=20261021-ws1');
+  const { SimConfig: Cfg } = await import('../js/simEngine.js?v=20261027-ob1');
   const a = new Cfg({}), b = new Cfg({});
   METHODS.residualMppi.configure(a); METHODS.residualMppiLlm.configure(b);
   assert.equal(a.controllerMode, 'residual_mppi');
@@ -167,7 +167,7 @@ test('MPC + RL and MPC + RL + LLM are separate modes: only the LLM mode uses tun
 
 test('deployed MPC + RL controllers load actor-only checkpoints, run cable-only and use the fast gait timing', async () => {
   const { buildConfig } = await import('../js/experimentProtocol.js');
-  const { Simulation: Sim, TerrainModel: Terrain, SphericalRoverModel: Rover } = await import('../js/simEngine.js?v=20261021-ws1');
+  const { Simulation: Sim, TerrainModel: Terrain, SphericalRoverModel: Rover } = await import('../js/simEngine.js?v=20261027-ob1');
   for (const method of ['residualMppi', 'residualMppiLlm']) {
     const cfg = buildConfig({ method, level: 1, seed: 1 });
     const sim = new Sim(cfg, new Rover(cfg), new Terrain(cfg), 'adaptive');

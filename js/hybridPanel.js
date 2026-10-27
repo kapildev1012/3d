@@ -8,11 +8,11 @@
  *    sharing SharedArrayBuffers (needs a cross-origin-isolated page; server.mjs and
  *    vercel.json send COOP/COEP).
  */
-import { SharedVecTensegrityEnv } from './parallelPool.js?v=20261021-ws1';
-import { MorphologyActorCritic, synergyMatrix } from './residualMppi.js?v=20261021-ws1';
-import { ResidualMppiTrainer } from './mppiPlanner.js?v=20261021-ws1';
-import { RESIDUAL_MPPI_WEIGHTS } from './residualMppiWeights.js?v=20261021-ws1';
-import { SimConfig, SphericalRoverModel } from './simEngine.js?v=20261021-ws1';
+import { SharedVecTensegrityEnv } from './parallelPool.js?v=20261027-ob1';
+import { MorphologyActorCritic, synergyMatrix } from './residualMppi.js?v=20261027-ob1';
+import { ResidualMppiTrainer } from './mppiPlanner.js?v=20261027-ob1';
+import { RESIDUAL_MPPI_WEIGHTS } from './residualMppiWeights.js?v=20261027-ob1';
+import { SimConfig, SphericalRoverModel } from './simEngine.js?v=20261027-ob1';
 
 const fmt = (x, d = 3) => (Number.isFinite(x) ? x.toFixed(d) : '–');
 

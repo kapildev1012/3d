@@ -8,8 +8,8 @@
  */
 import {
   summarizeLevel, displayStatus, formatRunSummary, primaryMetrics, LEVEL_COUNT
-} from './benchmarkCore.js?v=20261021-ws1';
-import { LEVELS } from './levels.js?v=20261021-ws1';
+} from './benchmarkCore.js?v=20261027-ob1';
+import { LEVELS } from './levels.js?v=20261027-ob1';
 
 const esc = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (value, digits) => (Number.isFinite(value) ? value.toFixed(digits) : '—');

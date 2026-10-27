@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildObstacleFieldForLevel, anchorObstacleField, sdf, SPAWN_PAD_RADIUS, footprintRadius } from '../js/obstacleField.js';
 import { resolveObstacleContacts, obstacleClearance, OBSTACLE_RESTITUTION } from '../js/obstacleContact.js';
 import { FieldObstacleTracker, mergeSummaries } from '../js/obstacleTracker.js';
-import { SimConfig, Simulation, TerrainModel, SphericalRoverModel } from '../js/simEngine.js?v=20261021-ws1';
+import { SimConfig, Simulation, TerrainModel, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
 import { configureLevel } from '../js/levels.js';
 import { buildConfig } from '../js/experimentProtocol.js';
 

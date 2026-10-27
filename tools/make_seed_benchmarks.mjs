@@ -14,10 +14,10 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SimConfig, SphericalRoverModel, TerrainModel, Simulation } from '../js/simEngine.js?v=20261021-ws1';
-import { configureLevel, LEVELS } from '../js/levels.js?v=20261021-ws1';
-import { RunRecorder } from '../js/runRecorder.js?v=20261021-ws1';
-import { emptyState, mergeStates } from '../js/benchmarkCore.js?v=20261021-ws1';
+import { SimConfig, SphericalRoverModel, TerrainModel, Simulation } from '../js/simEngine.js?v=20261027-ob1';
+import { configureLevel, LEVELS } from '../js/levels.js?v=20261027-ob1';
+import { RunRecorder } from '../js/runRecorder.js?v=20261027-ob1';
+import { emptyState, mergeStates } from '../js/benchmarkCore.js?v=20261027-ob1';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);

@@ -26,8 +26,8 @@
  *   driftAbs      sum of |per-step unexplained energy| over the run [J]
  */
 
-import { SimConfig, TerrainModel, SphericalRoverModel, Simulation } from './simEngine.js?v=20261021-ws1';
-import { residualTunedParams } from './residualDeploy.js?v=20261021-ws1';
+import { SimConfig, TerrainModel, SphericalRoverModel, Simulation } from './simEngine.js?v=20261027-ob1';
+import { residualTunedParams } from './residualDeploy.js?v=20261027-ob1';
 
 export const METHODS = Object.freeze({
   sgt: {

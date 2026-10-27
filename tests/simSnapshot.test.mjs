@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SimConfig } from '../js/simEngine.js?v=20261021-ws1';
+import { SimConfig } from '../js/simEngine.js?v=20261027-ob1';
 import { configureLevel } from '../js/levels.js';
 import { METHODS } from '../js/experimentProtocol.js';
-import { Simulation, TerrainModel, SphericalRoverModel } from '../js/simEngine.js?v=20261021-ws1';
+import { Simulation, TerrainModel, SphericalRoverModel } from '../js/simEngine.js?v=20261027-ob1';
 import { serializeState, deserializeState, encodeState, decodeState } from '../js/simSnapshot.js';
 
 console.info = () => {};

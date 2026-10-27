@@ -2,12 +2,12 @@ import {
   ADVANCED_CONTROLLER_LABELS,
   ADVANCED_MODES,
   solveAdvancedController
-} from './advancedControllers.js?v=20261021-ws1';
-import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
-import { GnssMpcNavigator } from './gnssNavigation.js?v=20261021-ws1';
-import { GuidedPolicy, solveTeacherQp, actuatorBounds } from './guidedPolicySearch.js?v=20261021-ws1';
-import { GUIDED_POLICY_WEIGHTS } from './guidedPolicyWeights.js?v=20261021-ws1';
-import { residualHookFor, residualTunedParams, isResidualMode } from './residualDeploy.js?v=20261021-ws1';
+} from './advancedControllers.js?v=20261027-ob1';
+import { relaxedCableTension } from './driveControllers.js?v=20261027-ob1';
+import { GnssMpcNavigator } from './gnssNavigation.js?v=20261027-ob1';
+import { GuidedPolicy, solveTeacherQp, actuatorBounds } from './guidedPolicySearch.js?v=20261027-ob1';
+import { GUIDED_POLICY_WEIGHTS } from './guidedPolicyWeights.js?v=20261027-ob1';
+import { residualHookFor, residualTunedParams, isResidualMode } from './residualDeploy.js?v=20261027-ob1';
 
 let sharedGuidedPolicy = null;
 /** Policy used by controllerMode 'guided_policy' (cfg.guidedPolicy.policy overrides the trained weights). */
@@ -22,14 +22,14 @@ import {
   senseCourseObstacle,
   obstacleActuation,
   ObstaclePassTracker
-} from './abExperiment.js?v=20261021-ws1';
-import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20261021-ws1';
-import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261021-ws1';
-import { SensitivityTippingController } from './tippingController.js?v=20261021-ws1';
-import { buildObstacleFieldForLevel, anchorObstacleField } from './obstacleField.js?v=20261021-ws1';
-import { DEFAULT_PARAMS as RESIDUAL_DEFAULT_PARAMS } from './residualMppi.js?v=20261021-ws1';
-import { resolveObstacleContacts } from './obstacleContact.js?v=20261021-ws1';
-import { FieldObstacleTracker, mergeSummaries } from './obstacleTracker.js?v=20261021-ws1';
+} from './abExperiment.js?v=20261027-ob1';
+import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20261027-ob1';
+import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261027-ob1';
+import { SensitivityTippingController } from './tippingController.js?v=20261027-ob1';
+import { buildObstacleFieldForLevel, anchorObstacleField } from './obstacleField.js?v=20261027-ob1';
+import { DEFAULT_PARAMS as RESIDUAL_DEFAULT_PARAMS } from './residualMppi.js?v=20261027-ob1';
+import { resolveObstacleContacts } from './obstacleContact.js?v=20261027-ob1';
+import { FieldObstacleTracker, mergeSummaries } from './obstacleTracker.js?v=20261027-ob1';
 
 export const LEVEL10_PERFORMANCE = Object.freeze({
   targetSpeed: 1.30,

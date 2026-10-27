@@ -22,7 +22,7 @@
  * stiffness, payload) are likewise unknown to it. Because candidate 0 is the
  * prior, the executed plan is never worse than the prior *under the model*.
  */
-import { SimConfig, Simulation } from './simEngine.js?v=20261021-ws1';
+import { SimConfig, Simulation } from './simEngine.js?v=20261027-ob1';
 import { serializeState, deserializeState } from './simSnapshot.js';
 import { OBS_DIM, ACT_DIM, TEL, TEL_DIM, PARAM_IDX, residualObservation, stageReward, sampleNoise, makeRng, packParams, DEFAULT_PARAMS } from './residualMppi.js';
 

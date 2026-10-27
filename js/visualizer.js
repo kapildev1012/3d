@@ -11,7 +11,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { addObstacleFieldMeshes } from './obstacleRenderer.js?v=20261021-ws1';
+import { addObstacleFieldMeshes } from './obstacleRenderer.js?v=20261027-ob1';
 
 // ── Procedural texturing helpers (photoreal Mars surface treatment) ──
 

@@ -2,32 +2,32 @@
  * APP.JS - Main Coordinator for 6-Bar Tensegrity Icosahedron Rover Simulator
  */
 
-import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer } from './simEngine.js?v=20261021-ws1';
-import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
-import { Visualizer } from './visualizer.js?v=20261021-ws1';
-import { AdaptiveRouteLearner, LEVEL14_LEARNING_DEFAULTS } from './adaptiveLearning.js?v=20261021-ws1';
+import { SimConfig, TerrainModel, SphericalRoverModel, Simulation, StructuralOptimizer } from './simEngine.js?v=20261027-ob1';
+import { relaxedCableTension } from './driveControllers.js?v=20261027-ob1';
+import { Visualizer } from './visualizer.js?v=20261027-ob1';
+import { AdaptiveRouteLearner, LEVEL14_LEARNING_DEFAULTS } from './adaptiveLearning.js?v=20261027-ob1';
 import {
   bothModelsReachedGoals,
   canStartNextTrainingAttempt,
   currentTrainingAttemptNumber
-} from './trainingCycle.js?v=20261021-ws1';
-import { BenchmarkPersistence } from './benchmarkPersistence.js?v=20261021-ws1';
-import { RunRecorder } from './runRecorder.js?v=20261021-ws1';
-import { BenchmarkMatrix } from './benchmarkMatrix.js?v=20261021-ws1';
-import { AutoBenchmark } from './autoBenchmark.js?v=20261021-ws1';
-import { runsForLevel, toCSV, emptyState } from './benchmarkCore.js?v=20261021-ws1';
-import { LEVELS, configureLevel, levelName } from './levels.js?v=20261021-ws1';
-import { renderFigures } from './figures.js?v=20261021-ws1';
-import { MATERIALS, DEFAULT_APP_MATERIAL, applyMaterial, massBreakdown } from './materials.js?v=20261021-ws1';
-import { roverStructuralModel } from './structuralAnalysis.js?v=20261021-ws1';
+} from './trainingCycle.js?v=20261027-ob1';
+import { BenchmarkPersistence } from './benchmarkPersistence.js?v=20261027-ob1';
+import { RunRecorder } from './runRecorder.js?v=20261027-ob1';
+import { BenchmarkMatrix } from './benchmarkMatrix.js?v=20261027-ob1';
+import { AutoBenchmark } from './autoBenchmark.js?v=20261027-ob1';
+import { runsForLevel, toCSV, emptyState } from './benchmarkCore.js?v=20261027-ob1';
+import { LEVELS, configureLevel, levelName } from './levels.js?v=20261027-ob1';
+import { renderFigures } from './figures.js?v=20261027-ob1';
+import { MATERIALS, DEFAULT_APP_MATERIAL, applyMaterial, massBreakdown } from './materials.js?v=20261027-ob1';
+import { roverStructuralModel } from './structuralAnalysis.js?v=20261027-ob1';
 import {
   bindNumericInputs, syncNumericInputs, bindDockTabs, trackToolbarHeight, readUrlState, writeUrlState
-} from './uiBindings.js?v=20261021-ws1';
-import { EXPERIMENT_SCHEMA, validateObject, validateSettingsFile } from './configSchema.js?v=20261021-ws1';
-import { SCENARIOS } from './experimentProtocol.js?v=20261021-ws1';
-import { BenchmarkPanel } from './benchmarkPanel.js?v=20261021-ws1';
-import { HybridPanel } from './hybridPanel.js?v=20261021-ws1';
-import { installMatlabTheme, setChartTheme, matlabLineOptions, matlabLine, xy, exportChartPNG, exportChartCSV, exportChartIEEE } from './matlabCharts.js?v=20261021-ws1';
+} from './uiBindings.js?v=20261027-ob1';
+import { EXPERIMENT_SCHEMA, validateObject, validateSettingsFile } from './configSchema.js?v=20261027-ob1';
+import { SCENARIOS } from './experimentProtocol.js?v=20261027-ob1';
+import { BenchmarkPanel } from './benchmarkPanel.js?v=20261027-ob1';
+import { HybridPanel } from './hybridPanel.js?v=20261027-ob1';
+import { installMatlabTheme, setChartTheme, matlabLineOptions, matlabLine, xy, exportChartPNG, exportChartCSV, exportChartIEEE } from './matlabCharts.js?v=20261027-ob1';
 
 const Chart = window.Chart;
 
