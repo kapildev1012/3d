@@ -172,3 +172,25 @@ test('decide(): an overloaded checkpoint with no safe checkpoint in the archive 
   assert.equal(decision.rollback, false);
   assert.equal(decision.to, entry);
 });
+
+test('one batched call updates all 14 terrains: per-level clamping, unknown levels rejected, omitted levels unchanged', async () => {
+  const { LlmMpcCoDesigner, DEFAULT_MPC, DEFAULT_REWARD, TERRAIN_LEVELS } = await import('../js/llmMpcOptimizer.js');
+  const byLevel = Object.fromEntries(TERRAIN_LEVELS.map(L => [L, { mpc: { ...DEFAULT_MPC }, reward: { ...DEFAULT_REWARD }, digests: [] }]));
+  let calls = 0, sent;
+  const reply = { globalCrossTerrainInsight: 'rocky levels need more COM drive',
+    perTerrainUpdates: [
+      { level: 4, diagnostic: 'ledges', updatedMpcConfig: { ...DEFAULT_MPC, qComMargin: 3.0, maxCableTensionN: 999 }, updatedRewardWeights: DEFAULT_REWARD },
+      { level: 99, diagnostic: 'bogus', updatedMpcConfig: DEFAULT_MPC, updatedRewardWeights: DEFAULT_REWARD }
+    ] };
+  const fetchImpl = async (url, init) => { calls++; sent = JSON.parse(init.body); return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(reply) } }] }) }; };
+  const d = new LlmMpcCoDesigner({ provider: 'compatible', endpoint: 'http://localhost:11434/v1/chat/completions', apiKey: 'x', fetchImpl });
+  const out = await d.proposeAll(byLevel, { episodes: 500 });
+  assert.equal(calls, 1, 'exactly one request for all 14 terrains');
+  assert.equal(JSON.parse(sent.messages[1].content).terrains.length, 14);
+  assert.equal(out.byLevel[4].updatedMpcConfig.qComMargin, 3.0);
+  assert.equal(out.byLevel[4].updatedMpcConfig.maxCableTensionN, 200);           // clamped to the bound
+  assert.deepEqual(out.byLevel[7].updatedMpcConfig, DEFAULT_MPC);                  // omitted -> unchanged
+  assert.ok(out.rejected.some(r => r.includes('99')));
+  const offline = await new LlmMpcCoDesigner({ provider: 'offline' }).proposeAll(byLevel, null);
+  assert.equal(Object.keys(offline.byLevel).length, 14);
+});

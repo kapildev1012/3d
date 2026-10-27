@@ -73,6 +73,7 @@ export class OnlineResidualPlanner {
   }
 
   act(ctx, eps, t0) {
+    ctx.params = this.model.params;
     residualObservation(ctx, this.obs);
     const prior = this.model.actPrior(this.obs, this.rho, this.out);
     const H = this.opts.horizon;

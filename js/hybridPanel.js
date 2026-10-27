@@ -133,8 +133,16 @@ export class HybridPanel {
     }
     const params = this.root.querySelector('#hybrid-params');
     if (params) {
-      const entries = [...Object.entries(s.mpc), ...Object.entries(s.reward).map(([k, v]) => [`reward.${k}`, v])];
-      params.replaceChildren(...entries.map(([k, v]) => el('tr', {}, [el('td', { text: k }), el('td', { text: Number.isInteger(v) ? String(v) : fmt(v, 4) })])));
+      if (s.mpcByLevel) {
+        // 14-terrain checkpoint: one configuration per level (compact view of the main knobs).
+        params.replaceChildren(...Object.entries(s.mpcByLevel).map(([L, m]) => el('tr', {}, [
+          el('td', { text: `L${L}` }),
+          el('td', { text: `qVel ${fmt(m.qVelocityTrack, 2)} · qCOM ${fmt(m.qComMargin, 2)} · Kp ${fmt(m.sgtGainKp, 2)} · settle ${fmt(m.sgtSettleSpeed, 2)} m/s · release ${fmt(m.sgtReleaseTime, 2)} s · T ${fmt(m.minCableTensionN, 0)}–${fmt(m.maxCableTensionN, 0)} N · H ${m.horizonSteps}` })
+        ])));
+      } else {
+        const entries = [...Object.entries(s.mpc || {}), ...Object.entries(s.reward || {}).map(([k, v]) => [`reward.${k}`, v])];
+        params.replaceChildren(...entries.map(([k, v]) => el('tr', {}, [el('td', { text: k }), el('td', { text: Number.isInteger(v) ? String(v) : fmt(v, 4) })])));
+      }
     }
     const table = this.root.querySelector('#hybrid-table');
     if (table) {

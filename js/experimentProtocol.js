@@ -69,7 +69,7 @@ export const METHODS = Object.freeze({
     label: 'MPC + RL + LLM: residual-MPPI actor with LLM-co-designed MPC/reward (tension shield)', short: 'MPC+RL+LLM',
     configure: cfg => {
       cfg.applyResearchProfile(); cfg.controllerMode = 'residual_mppi_llm';
-      const tuned = residualTunedParams('residual_mppi_llm');
+      const tuned = residualTunedParams('residual_mppi_llm', cfg.experimentId);
       cfg.tensionShield = { coreTensionMin: tuned.minCableTensionN ?? 10, outerTensionMax: Math.min(150, tuned.maxCableTensionN ?? 150) };
     }
   },

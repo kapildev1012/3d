@@ -125,7 +125,7 @@ export class ResidualEnv {
     const sgt = this.sim.sgt;
     return residualObservation({
       sim: this.sim, margin: sgt?.lastPlan?.margin ?? 0, state: sgt?.state ?? 'SGT_SETTLE',
-      elapsed: sgt ? this.sim.t-sgt.enteredAt : 0
+      elapsed: sgt ? this.sim.t-sgt.enteredAt : 0, params: this.params
     }, out);
   }
 
@@ -133,6 +133,7 @@ export class ResidualEnv {
   decide(ctx) {
     const rho = this.params[PARAM_IDX.maxResidualStrokeM];
     if (this.spec?.variant === 'sgt120') { this.du.fill(0); this.called = true; this.lastObs.fill(0); this.lastDu.fill(0); return this.du; }
+    ctx.params = this.params;                              // MPC context of the running terrain
     residualObservation(ctx, this.obsTmp);
     this.actor.forward(this.obsTmp, rho, this.du);
     for (let c = 0; c < ACT_DIM; c++) this.du[c] = clip(this.du[c]+this.eps[c], -rho, rho);

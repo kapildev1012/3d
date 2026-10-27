@@ -187,16 +187,27 @@ export class ResidualMppiTrainer {
  * Evaluate the actor prior (no search) on a list of specs, in parallel over
  * all workers. Returns one digest per spec (same order).
  */
-export async function evaluateSpecs(pool, model, specs, duration) {
-  pool.setParams(model.params);
+export async function evaluateSpecs(pool, model, specs, duration, paramsFor = null) {
   pool.setWeights(model.actor.w);
   const W = pool.numEnvs, out = new Array(specs.length);
-  for (let first = 0; first < specs.length; first += W) {
-    const ids = Array.from({ length: Math.min(W, specs.length-first) }, (_, i) => i);
-    for (const id of ids) pool.specToSlot(id, specs[first+id]);
-    await pool.broadcast(CMD.RESET, ids);
-    await pool.broadcast(CMD.EPISODE, ids, () => [0, 0, Math.round(duration*1000), 0]);
-    for (const id of ids) out[first+id] = { spec: specs[first+id], ...pool.getDigest(id) };
+  // Per-terrain parameters (multi-terrain training): evaluate level by level, each with its own
+  // MPC / gait / reward configuration; otherwise one configuration for every spec.
+  const groups = new Map();
+  specs.forEach((spec, i) => {
+    const key = paramsFor ? spec.level : 0;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+  for (const [key, indices] of groups) {
+    pool.setParams(paramsFor ? paramsFor(specs[indices[0]]) : model.params);
+    for (let first = 0; first < indices.length; first += W) {
+      const chunk = indices.slice(first, first+W);
+      chunk.forEach((specIndex, id) => pool.specToSlot(id, specs[specIndex]));
+      const ids = chunk.map((_, id) => id);
+      await pool.broadcast(CMD.RESET, ids);
+      await pool.broadcast(CMD.EPISODE, ids, () => [0, 0, Math.round(duration*1000), 0]);
+      chunk.forEach((specIndex, id) => { out[specIndex] = { spec: specs[specIndex], ...pool.getDigest(id) }; });
+    }
   }
   return out;
 }

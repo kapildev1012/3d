@@ -32,7 +32,17 @@
  * threads, browser Web Workers and the UI.
  */
 
-export const OBS_DIM = 48;
+/**
+ * Observation = 48-D rover state + 14-D terrain one-hot + 11-D live MPC parameters.
+ * The terrain and MPC context make one shared policy terrain- and MPC-conditioned:
+ * when the meta-controller retunes terrain k, the policy sees the new parameters.
+ */
+export const OBS_BASE_DIM = 48;
+export const TERRAIN_DIM = 14;
+export const MPC_CONTEXT_KEYS = Object.freeze(['horizonSteps', 'qVelocityTrack', 'qLateralRmse', 'qComMargin', 'qClearance',
+  'rControlEffort', 'rSmoothnessDeltaU', 'minCableTensionN', 'maxCableTensionN', 'sgtGainKp', 'sgtGainKd']);
+const MPC_CONTEXT_SCALE = Object.freeze([16, 10, 10, 10, 10, 1, 1, 25, 200, 2.5, 2]);
+export const OBS_DIM = OBS_BASE_DIM+TERRAIN_DIM+MPC_CONTEXT_KEYS.length;   // 73
 export const ACT_DIM = 24;
 export const SYNERGY_DIM = 6;
 export const HIDDEN = 64;
@@ -102,7 +112,21 @@ export function synergyMatrix(rover) {
 // ------------------------------------------------------------------ observation and reward
 const clip = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 
-/** 48-D observation from the live simulation (and the controller context). */
+/** Write the normalized 11-D MPC context (params: object or packed vector) at out[offset..]. */
+export function mpcContext(params, out, offset = 0) {
+  MPC_CONTEXT_KEYS.forEach((key, i) => {
+    const raw = params == null ? DEFAULT_PARAMS[key]
+      : ArrayBuffer.isView(params) ? params[PARAM_IDX[key]] : (params[key] ?? DEFAULT_PARAMS[key]);
+    out[offset+i] = clip(raw/MPC_CONTEXT_SCALE[i], -3, 3);
+  });
+  return out;
+}
+
+/**
+ * 73-D observation from the live simulation and the controller context:
+ * [0..47] rover state, [48..61] terrain one-hot (cfg.experimentId), [62..72] MPC context
+ * (ctx.params: the parameters the controller is running with; defaults if absent).
+ */
 export function residualObservation(ctx, out = new Float64Array(OBS_DIM)) {
   const sim = ctx.sim, n = sim.rover.nOuter;
   let cx = 0, cy = 0, cz = 0, vx = 0, vy = 0, vz = 0;
@@ -128,8 +152,29 @@ export function residualObservation(ctx, out = new Float64Array(OBS_DIM)) {
     out[12+c] = clip((length-rest)/Math.max(rest, 1e-6)*20, -3, 3);
   });
   for (let k = 0; k < 12; k++) out[36+k] = clip((sim.coreCableForces?.[k] ?? 0)/50, 0, 4);
+  const level = Math.round(sim.cfg.experimentId || 1);
+  for (let k = 0; k < TERRAIN_DIM; k++) out[OBS_BASE_DIM+k] = k === level-1 ? 1 : 0;
+  mpcContext(ctx.params, out, OBS_BASE_DIM+TERRAIN_DIM);
   return out;
 }
+
+/**
+ * Widen first-layer weights trained on an older, smaller observation (e.g. the 48-D one)
+ * to OBS_DIM: old columns are kept, new input columns start at zero, so a migrated
+ * network computes exactly what it computed before.
+ */
+export function migrateInputWeights(flat, oldDim, hidden = HIDDEN) {
+  const extra = OBS_DIM-oldDim;
+  const out = new Float64Array(flat.length+hidden*extra);
+  for (let h = 0; h < hidden; h++) out.set(flat.subarray ? flat.subarray(h*oldDim, (h+1)*oldDim) : flat.slice(h*oldDim, (h+1)*oldDim), h*OBS_DIM);
+  out.set(flat.subarray ? flat.subarray(hidden*oldDim) : flat.slice(hidden*oldDim), hidden*OBS_DIM);
+  return out;
+}
+const widen = (w, size) => {
+  if (w.length === size) return w;
+  for (const old of [48]) if (w.length === size-HIDDEN*(OBS_DIM-old)) return migrateInputWeights(Float64Array.from(w), old);
+  throw new Error(`weight vector has ${w.length} entries, expected ${size}`);
+};
 
 /**
  * Stage reward of one control tick from its telemetry (higher is better).
@@ -303,7 +348,7 @@ export class SynergyActor {
     return loss/(n*ACT_DIM);
   }
   toJSON() { return { w: Array.from(this.w), mixSynergy: this.mixSynergy, mixFine: this.mixFine }; }
-  load(json) { this.w.set(json.w); this.mixSynergy = json.mixSynergy ?? 0.7; this.mixFine = json.mixFine ?? 0.3; return this; }
+  load(json) { this.w.set(widen(json.w, this.w.length)); this.mixSynergy = json.mixSynergy ?? 0.7; this.mixFine = json.mixFine ?? 0.3; return this; }
 }
 export const ACTOR_PARAM_COUNT = ACTOR_SIZE;
 
@@ -400,7 +445,7 @@ export class TwinCritic {
   }
   toJSON() { return { v1: Array.from(this.v1.w), v2: Array.from(this.v2.w) }; }
   load(json) {
-    this.v1.w.set(json.v1); this.v2.w.set(json.v2);
+    this.v1.w.set(widen(json.v1, this.v1.w.length)); this.v2.w.set(widen(json.v2, this.v2.w.length));
     this.t1.copyFrom(this.v1); this.t2.copyFrom(this.v2);
     return this;
   }
@@ -509,6 +554,7 @@ export function residualPolicyHook(model, overrides = {}) {
     maxResidualStrokeM: rho,
     maxTotalStrokeM: overrides.maxTotalStrokeM ?? model.params.maxTotalStrokeM,
     act(ctx) {
+      ctx.params = model.params;
       residualObservation(ctx, obs);
       return model.actPrior(obs, rho, out);
     }

@@ -91,6 +91,51 @@ export function validateUpdate(raw, current) {
   return { diagnosticSummary: raw.diagnosticSummary.slice(0, 2000), updatedMpcConfig: mpc, updatedRewardWeights: reward };
 }
 
+// ------------------------------------------------------------------ 14 terrains in one call
+export const TERRAIN_LEVELS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+
+/** Structured output for one batched meta-update of all 14 terrains. */
+export const MultiTerrainUpdateSchema = Object.freeze({
+  type: 'object', additionalProperties: false,
+  required: ['globalCrossTerrainInsight', 'perTerrainUpdates'],
+  properties: {
+    globalCrossTerrainInsight: { type: 'string', description: 'What the 14 terrains have in common / differ in, before the numbers.' },
+    perTerrainUpdates: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['level', 'diagnostic', 'updatedMpcConfig', 'updatedRewardWeights'],
+        properties: {
+          level: { type: 'integer' },
+          diagnostic: { type: 'string' },
+          updatedMpcConfig: MpcAndRewardUpdateSchema.properties.updatedMpcConfig,
+          updatedRewardWeights: MpcAndRewardUpdateSchema.properties.updatedRewardWeights
+        }
+      }
+    }
+  }
+});
+
+export const MULTI_TERRAIN_INSTRUCTIONS = `MULTI-TERRAIN MODE: one shared terrain- and MPC-conditioned policy is trained on all 14 terrains in the same round, and each terrain k has its own MPC / gait / reward configuration. The payload gives, per level, its current configuration, its held-out benchmark rows and its inner-loop statistics. Return one entry in perTerrainUpdates for every level you want to change (omitted levels keep their configuration), each with a short diagnostic, and a globalCrossTerrainInsight. The same bounds and safety rules apply to every terrain; never widen maxResidualStrokeM.`;
+
+/**
+ * Validate a batched answer: every entry is clamped like a single update; unknown
+ * levels are ignored; levels that are missing or malformed keep their configuration.
+ * Returns { insight, byLevel: { [level]: {diagnosticSummary, updatedMpcConfig, updatedRewardWeights} }, rejected: [] }.
+ */
+export function validateMultiTerrainUpdate(raw, currentByLevel) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.perTerrainUpdates)) throw new Error('perTerrainUpdates missing');
+  const byLevel = {}, rejected = [];
+  for (const item of raw.perTerrainUpdates) {
+    const level = Number(item?.level);
+    if (!currentByLevel[level]) { rejected.push(`level ${item?.level}: unknown`); continue; }
+    try {
+      byLevel[level] = validateUpdate({ diagnosticSummary: String(item.diagnostic ?? ''), updatedMpcConfig: item.updatedMpcConfig, updatedRewardWeights: item.updatedRewardWeights }, currentByLevel[level]);
+    } catch (error) { rejected.push(`level ${level}: ${error.message}`); }
+  }
+  return { insight: String(raw.globalCrossTerrainInsight ?? '').slice(0, 2000), byLevel, rejected };
+}
+
 /** MPC + reward dictionaries -> the flat parameter object used by js/residualMppi.js. */
 export function toParams(mpc, reward, base = DEFAULT_PARAMS) {
   return {
@@ -347,6 +392,45 @@ export class LlmMpcCoDesigner {
     return { ...update, source };
   }
 
+  /**
+   * ONE batched meta-update for all terrains.
+   * @param {object} byLevel { [level]: { mpc, reward, digests, inner } } (inner = that terrain's inner-loop stats)
+   * @param {object} innerLoop round-level inner-loop summary
+   * @returns {{ source, insight, byLevel: {[level]: update}, rejected }} always validated and clamped;
+   *          levels without a usable answer get the rule tuner's update.
+   */
+  async proposeAll(byLevel, innerLoop = null) {
+    const levels = Object.keys(byLevel).map(Number).sort((a, b) => a-b);
+    const current = Object.fromEntries(levels.map(L => [L, { mpc: byLevel[L].mpc, reward: byLevel[L].reward }]));
+    const rule = L => validateUpdate(ruleBasedUpdate(current[L], byLevel[L].digests || []), current[L]);
+    let source = this.provider, insight = '', validated = { byLevel: {}, rejected: [] };
+    if (this.provider !== 'offline') {
+      const payload = JSON.stringify({
+        mode: 'multi-terrain', targetVelocityMs: 1.30, maxAllowedStrokeM: 0.120, maxResidualStrokeM: 0.030,
+        innerLoopSummary: innerLoop,
+        terrains: levels.map(L => ({ level: L, currentMpcConfig: byLevel[L].mpc, currentRewardWeights: byLevel[L].reward,
+          innerLoop: byLevel[L].inner || null, latestBenchmarkTable: (byLevel[L].digests || []).map(promptRow) })),
+        previousRounds: this.history.slice(-3).map(h => ({ round: h.epoch, composite: round(h.composite, 3), completion: round(h.safety.completion, 1), overload: h.safety.overload }))
+      });
+      try {
+        const raw = await this.callModel(null, { payload, schema: MultiTerrainUpdateSchema, schemaName: 'MultiTerrainUpdateSchema', toolName: 'update_all_terrains', systemSuffix: MULTI_TERRAIN_INSTRUCTIONS });
+        validated = validateMultiTerrainUpdate(raw, current);
+        insight = validated.insight;
+        if (validated.rejected.length) this.lastError = `rejected entries: ${validated.rejected.join('; ')}`;
+      } catch (error) {
+        this.lastError = String(error.message || error).replace(/(key|token|bearer)\s*[:=]?\s*\S+/gi, '$1 [redacted]');
+        source = 'offline-fallback';
+      }
+    }
+    const out = {};
+    for (const L of levels) {
+      if (validated.byLevel[L]) out[L] = { ...validated.byLevel[L], source };
+      else if (this.provider === 'offline' || source === 'offline-fallback') out[L] = { ...rule(L), source: this.provider === 'offline' ? 'offline' : 'offline-fallback' };
+      else out[L] = { diagnosticSummary: 'unchanged (no update returned for this level)', updatedMpcConfig: current[L].mpc, updatedRewardWeights: current[L].reward, source };
+    }
+    return { source, insight, byLevel: out, rejected: validated.rejected };
+  }
+
   userPayload({ mpc, reward, rows, best, innerLoop = null }) {
     return JSON.stringify({
       // Aggregated failure modes of the inner learning loop since the last meta-update.
@@ -361,20 +445,28 @@ export class LlmMpcCoDesigner {
     }, null, 1);
   }
 
-  async callModel(context) {
+  /**
+   * One structured call. `request` = { payload, schema, schemaName, toolName, systemSuffix }
+   * (defaults: the single-configuration MpcAndRewardUpdateSchema built from `context`).
+   */
+  async callModel(context, request = null) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const schema = request?.schema || MpcAndRewardUpdateSchema;
+    const schemaName = request?.schemaName || 'MpcAndRewardUpdateSchema';
+    const toolName = request?.toolName || 'update_mpc_and_reward';
+    const systemPrompt = request?.systemSuffix ? `${this.systemPrompt}\n\n${request.systemSuffix}` : this.systemPrompt;
     try {
-      const payload = this.userPayload(context);
+      const payload = request?.payload || this.userPayload(context);
       if (this.provider === 'anthropic') {
         const response = await this.fetchImpl(this.endpoint, {
           method: 'POST', signal: controller.signal,
           headers: { 'content-type': 'application/json', 'x-api-key': this.apiKey, 'anthropic-version': '2023-06-01' },
           body: JSON.stringify({
-            model: this.model, max_tokens: 2048, temperature: 0.2, system: this.systemPrompt,
+            model: this.model, max_tokens: request ? 8192 : 2048, temperature: 0.2, system: systemPrompt,
             messages: [{ role: 'user', content: payload }],
-            tools: [{ name: 'update_mpc_and_reward', description: 'Return the next MPC cost weights, SGT/shield parameters and RL reward weights.', input_schema: MpcAndRewardUpdateSchema }],
-            tool_choice: { type: 'tool', name: 'update_mpc_and_reward' }
+            tools: [{ name: toolName, description: 'Return the next MPC cost weights, SGT/shield parameters and RL reward weights.', input_schema: schema }],
+            tool_choice: { type: 'tool', name: toolName }
           })
         });
         if (!response.ok) throw new Error(`LLM HTTP ${response.status}`);
@@ -392,11 +484,11 @@ export class LlmMpcCoDesigner {
         body: JSON.stringify({
           model: this.model, temperature: 0.2,
           messages: [
-            { role: 'system', content: compatible ? `${this.systemPrompt}\n\nReply with ONE JSON object only, matching this JSON Schema:\n${JSON.stringify(MpcAndRewardUpdateSchema)}` : this.systemPrompt },
+            { role: 'system', content: compatible ? `${systemPrompt}\n\nReply with ONE JSON object only, matching this JSON Schema:\n${JSON.stringify(schema)}` : systemPrompt },
             { role: 'user', content: payload }
           ],
           response_format: compatible ? { type: 'json_object' }
-            : { type: 'json_schema', json_schema: { name: 'MpcAndRewardUpdateSchema', strict: true, schema: MpcAndRewardUpdateSchema } }
+            : { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema } }
         })
       });
       if (!response.ok) throw new Error(`LLM HTTP ${response.status}`);

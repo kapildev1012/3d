@@ -3177,7 +3177,7 @@ export class Simulation {
     // (actor and gait/shield parameters chosen by the LLM co-designer loop).
     if (isResidualMode(cfg.controllerMode)) {
       options.residual = residualHookFor(this, cfg.controllerMode);
-      const tuned = residualTunedParams(cfg.controllerMode);
+      const tuned = residualTunedParams(cfg.controllerMode, cfg.experimentId);
       if (tuned.sgtGainKp !== undefined && options.gainKp === undefined) options.gainKp = tuned.sgtGainKp;
       if (tuned.sgtGainKd !== undefined && options.gainKd === undefined) options.gainKd = tuned.sgtGainKd;
       // Gait timing: MPC + RL uses the swept 'fast' defaults, MPC + RL + LLM the co-designed values;

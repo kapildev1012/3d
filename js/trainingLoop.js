@@ -11,6 +11,16 @@ export const TRAIN_LEVELS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13
 export const TRAIN_SCENARIOS = Object.freeze(['nominal', 'nominal', 'push', 'gaussian', 'laplace', 'outlier', 'stiffness', 'friction', 'payload', 'delay']);
 export const PHYSICS_STEPS_PER_TICK = 25;            // 500 Hz physics / 20 Hz control
 
+/**
+ * Multi-terrain schedule: episode e of a round runs on level ((e + round) mod 14) + 1, so
+ * every block of 14 consecutive episodes covers all 14 terrains (one shared policy, each
+ * terrain with its own MPC / reward configuration); scenario and seed are randomised.
+ */
+export function multiTerrainSpec(round, episode) {
+  const base = trainSpec(round, episode);
+  return { ...base, level: ((episode+round) % 14)+1 };
+}
+
 /** Deterministic domain-randomised episode spec for (round, episode). */
 export function trainSpec(round, episode) {
   let h = (round * 7919 + episode * 104729 + 12345) >>> 0;
