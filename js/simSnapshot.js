@@ -25,8 +25,9 @@
  * keeps a reference to sim.q) stay valid.
  */
 
-const STATIC_SIM_KEYS = new Set(['cfg', 'rover', 'terrain', 'terrainSource', 'routeLearner', 'history']);
-const STATIC_OBJECT_KEYS = new Set(['sim', 'opts', 'cfg', 'rover', 'terrain', 'terrainSource', 'routeLearner']);
+const STATIC_SIM_KEYS = new Set(['cfg', 'rover', 'terrain', 'terrainSource', 'routeLearner', 'history', 'onlinePlanner', 'preStep']);
+// 'field' = the shared obstacle list referenced by FieldObstacleTracker (static, owned by the terrain).
+const STATIC_OBJECT_KEYS = new Set(['sim', 'opts', 'cfg', 'rover', 'terrain', 'terrainSource', 'routeLearner', 'field']);
 const NONFINITE = { 'Infinity': Infinity, '-Infinity': -Infinity, 'NaN': NaN };
 const TYPED = { Float64Array, Float32Array, Int32Array, Uint8Array, Uint32Array, Int16Array, Uint16Array, Int8Array };
 

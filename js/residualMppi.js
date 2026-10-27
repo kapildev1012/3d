@@ -50,6 +50,8 @@ export const PARAM_NAMES = Object.freeze([
   // MPC cost weights and gait/shield parameters (TunableMpcConfig)
   'horizonSteps', 'qVelocityTrack', 'qLateralRmse', 'qComMargin', 'qClearance',
   'rControlEffort', 'rSmoothnessDeltaU', 'minCableTensionN', 'maxCableTensionN', 'sgtGainKp', 'sgtGainKd',
+  // SGT gait timing (SETTLE -> SHIFT trigger and RELEASE hold); the main lever on cycle rate
+  'sgtSettleSpeed', 'sgtSettleMinTime', 'sgtSettleMaxTime', 'sgtReleaseTime',
   // RL reward shaping weights
   'wVelocity', 'wRmse', 'wEffort', 'wCot', 'wResidual', 'wSlack', 'wSlip', 'wComMargin',
   // residual bounds
@@ -63,6 +65,8 @@ export const DEFAULT_PARAMS = Object.freeze({
   horizonSteps: 10, qVelocityTrack: 4.0, qLateralRmse: 2.5, qComMargin: 1.8, qClearance: 1.2,
   rControlEffort: 0.08, rSmoothnessDeltaU: 0.15, minCableTensionN: 10.0, maxCableTensionN: 150.0,
   sgtGainKp: 1.0, sgtGainKd: 0.0,
+  // 'fast' timing (plain SGT uses 0.12 m/s, 0.20 s, 1.20 s, 0.35 s): ~3x progress on Level 1 in the timing sweep
+  sgtSettleSpeed: 0.30, sgtSettleMinTime: 0.10, sgtSettleMaxTime: 0.45, sgtReleaseTime: 0.18,
   wVelocity: 2.5, wRmse: 1.2, wEffort: 0.05, wCot: 0.4, wResidual: 6.0, wSlack: 2.0, wSlip: 1.0, wComMargin: 0.5,
   maxResidualStrokeM: 0.030, maxTotalStrokeM: 0.120,
   gamma: 0.98, rodLimitMm: 0.05, targetSpeed: 1.30
@@ -413,7 +417,7 @@ export class MorphologyActorCritic {
   evaluateValue(obs) { return this.critic.value(obs); }
   toJSON() { return { actor: this.actor.toJSON(), critic: this.critic.toJSON(), params: this.params }; }
   load(json) {
-    this.actor.load(json.actor); this.critic.load(json.critic);
+    this.actor.load(json.actor); if (json.critic) this.critic.load(json.critic);   // deployment checkpoints carry the actor only
     if (json.params) this.params = { ...this.params, ...json.params };
     return this;
   }

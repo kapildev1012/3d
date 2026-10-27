@@ -27,6 +27,7 @@ import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?
 import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261021-ws1';
 import { SensitivityTippingController } from './tippingController.js?v=20261021-ws1';
 import { buildObstacleFieldForLevel, anchorObstacleField } from './obstacleField.js?v=20261021-ws1';
+import { DEFAULT_PARAMS as RESIDUAL_DEFAULT_PARAMS } from './residualMppi.js?v=20261021-ws1';
 import { resolveObstacleContacts } from './obstacleContact.js?v=20261021-ws1';
 import { FieldObstacleTracker, mergeSummaries } from './obstacleTracker.js?v=20261021-ws1';
 
@@ -3179,6 +3180,12 @@ export class Simulation {
       const tuned = residualTunedParams(cfg.controllerMode);
       if (tuned.sgtGainKp !== undefined && options.gainKp === undefined) options.gainKp = tuned.sgtGainKp;
       if (tuned.sgtGainKd !== undefined && options.gainKd === undefined) options.gainKd = tuned.sgtGainKd;
+      // Gait timing: MPC + RL uses the swept 'fast' defaults, MPC + RL + LLM the co-designed values;
+      // explicit cfg.sgtOptions always win.
+      const timing = { settleSpeed: 'sgtSettleSpeed', settleMinTime: 'sgtSettleMinTime', settleMaxTime: 'sgtSettleMaxTime', releaseTime: 'sgtReleaseTime' };
+      for (const [option, key] of Object.entries(timing)) {
+        if (options[option] === undefined) options[option] = tuned[key] ?? RESIDUAL_DEFAULT_PARAMS[key];
+      }
     }
     // Tension-certified safety filter (tensionShield.js) on any tipping controller.
     if (cfg.tensionShield) options.shield = cfg.tensionShield === true ? {} : cfg.tensionShield;
@@ -3186,6 +3193,9 @@ export class Simulation {
   }
 
   step() {
+    // Live MPC planning (MPC + RL with residualOnlinePlanning) runs here, between
+    // steps, where the state is consistent for an exact snapshot.
+    if (this.preStep) this.preStep(this);
     const n = this.rover.nOuter;
     const cfg = this.cfg;
     const q = this.q;

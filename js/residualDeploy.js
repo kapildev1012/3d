@@ -19,6 +19,7 @@
 import { MorphologyActorCritic, synergyMatrix, residualPolicyHook, DEFAULT_PARAMS } from './residualMppi.js?v=20261021-ws1';
 import { RESIDUAL_MPPI_WEIGHTS } from './residualMppiWeights.js?v=20261021-ws1';
 import { RESIDUAL_MPPI_WEIGHTS_RL } from './residualMppiWeightsRl.js?v=20261021-ws1';
+import { OnlineResidualPlanner } from './onlinePlanner.js?v=20261021-ws1';
 
 export const isLlmMode = mode => mode === 'residual_mppi_llm';
 export const isResidualMode = mode => mode === 'residual_mppi' || mode === 'residual_mppi_llm';
@@ -33,11 +34,19 @@ export function residualCheckpoint(mode = 'residual_mppi') {
 export function residualHookFor(sim, mode = sim.cfg.controllerMode) {
   if (sim.cfg.residualMppi) return sim.cfg.residualMppi;
   const { weights } = residualCheckpoint(mode);
-  if (!weights) return { maxResidualStrokeM: DEFAULT_PARAMS.maxResidualStrokeM, maxTotalStrokeM: DEFAULT_PARAMS.maxTotalStrokeM, act: () => null };
+  const planning = Boolean(sim.cfg.residualOnlinePlanning);
+  if (!weights && !planning) return { maxResidualStrokeM: DEFAULT_PARAMS.maxResidualStrokeM, maxTotalStrokeM: DEFAULT_PARAMS.maxTotalStrokeM, act: () => null };
   const model = new MorphologyActorCritic(synergyMatrix(sim.rover));
-  model.load(weights);
+  if (weights) model.load(weights);
   // MPC + RL always runs with the default stroke limits; MPC + RL + LLM uses the tuned ones.
   if (!isLlmMode(mode)) model.params = { ...model.params, maxResidualStrokeM: DEFAULT_PARAMS.maxResidualStrokeM, maxTotalStrokeM: DEFAULT_PARAMS.maxTotalStrokeM };
+  if (planning) {
+    // Live receding-horizon residual-MPPI around the actor prior (js/onlinePlanner.js).
+    const planner = new OnlineResidualPlanner(sim, model, sim.cfg.onlinePlanning || {});
+    sim.onlinePlanner = planner;
+    sim.preStep = s => planner.maybePlan(s);
+    return planner.hook;
+  }
   return residualPolicyHook(model);
 }
 

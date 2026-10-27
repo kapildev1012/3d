@@ -113,7 +113,7 @@ export const ABLATIONS = Object.freeze({
   legacyCore: { label: 'legacy SHAKE core', apply: cfg => { cfg.physicsCore = 'legacy'; cfg.contactModel = 'legacy'; } }
 });
 
-export function buildConfig({ method = 'sgt', scenario = 'nominal', ablation = null, seed = 42, level = 1 } = {}) {
+export function buildConfig({ method = 'sgt', scenario = 'nominal', ablation = null, seed = 42, level = 1, overrides = null } = {}) {
   const cfg = new SimConfig({
     terrainLevel: level, experimentId: level, seed,
     enableDiagnosticsLog: false, monitoring: { enabled: false }
@@ -122,6 +122,7 @@ export function buildConfig({ method = 'sgt', scenario = 'nominal', ablation = n
   METHODS[method].configure(cfg);
   SCENARIOS[scenario]?.apply(cfg);
   if (ablation) ABLATIONS[ablation].apply(cfg);
+  if (overrides) Object.assign(cfg, overrides);         // e.g. { residualOnlinePlanning: true }
   return cfg;
 }
 

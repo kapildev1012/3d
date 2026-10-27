@@ -28,7 +28,8 @@ import { DEFAULT_PARAMS } from './residualMppi.js';
 
 export const TUNABLE_MPC_KEYS = Object.freeze([
   'horizonSteps', 'qVelocityTrack', 'qLateralRmse', 'qComMargin', 'qClearance',
-  'rControlEffort', 'rSmoothnessDeltaU', 'minCableTensionN', 'maxCableTensionN', 'sgtGainKp', 'sgtGainKd', 'maxResidualStrokeM'
+  'rControlEffort', 'rSmoothnessDeltaU', 'minCableTensionN', 'maxCableTensionN', 'sgtGainKp', 'sgtGainKd', 'maxResidualStrokeM',
+  'sgtSettleSpeed', 'sgtSettleMinTime', 'sgtSettleMaxTime', 'sgtReleaseTime'
 ]);
 export const REWARD_KEYS = Object.freeze(['velocity', 'rmse', 'effort', 'cot', 'residual', 'slack', 'slip', 'comMargin']);
 
@@ -37,6 +38,7 @@ export const BOUNDS = Object.freeze({
   horizonSteps: [6, 16], qVelocityTrack: [0.01, 50], qLateralRmse: [0.01, 50], qComMargin: [0.01, 50], qClearance: [0.01, 50],
   rControlEffort: [0.001, 50], rSmoothnessDeltaU: [0.001, 50], minCableTensionN: [5, 25], maxCableTensionN: [120, 200],
   sgtGainKp: [0.5, 2.5], sgtGainKd: [0, 2], maxResidualStrokeM: [0.005, 0.030],
+  sgtSettleSpeed: [0.08, 0.50], sgtSettleMinTime: [0.03, 0.40], sgtSettleMaxTime: [0.25, 1.50], sgtReleaseTime: [0.10, 0.50],
   velocity: [0, 20], rmse: [0, 20], effort: [0, 20], cot: [0, 20], residual: [0, 20], slack: [0, 20], slip: [0, 20], comMargin: [0, 20]
 });
 
@@ -206,7 +208,9 @@ export function ruleBasedUpdate(current, digests) {
   }
   if (!fired.length) {
     mul(mpc, 'qVelocityTrack', 1.1); mul(reward, 'velocity', 1.1);
-    fired.push('all admissibility checks pass: push forward speed');
+    // The gait waits in SETTLE/RELEASE most of a cycle: shorten the waits while everything is admissible.
+    mul(mpc, 'sgtReleaseTime', 0.9); mul(mpc, 'sgtSettleMaxTime', 0.9); mul(mpc, 'sgtSettleSpeed', 1.1);
+    fired.push('all admissibility checks pass: push forward speed and shorten the SGT settle/release waits');
   }
   return { diagnosticSummary: `[rule-based] ${fired.join('; ')}.`, updatedMpcConfig: roundHorizon(mpc), updatedRewardWeights: reward };
 }

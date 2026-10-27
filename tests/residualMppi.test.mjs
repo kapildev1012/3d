@@ -164,3 +164,16 @@ test('MPC + RL and MPC + RL + LLM are separate modes: only the LLM mode uses tun
   assert.equal(b.controllerMode, 'residual_mppi_llm');
   assert.ok(b.tensionShield.outerTensionMax <= 150);
 });
+
+test('deployed MPC + RL controllers load actor-only checkpoints, run cable-only and use the fast gait timing', async () => {
+  const { buildConfig } = await import('../js/experimentProtocol.js');
+  const { Simulation: Sim, TerrainModel: Terrain, SphericalRoverModel: Rover } = await import('../js/simEngine.js?v=20261021-ws1');
+  for (const method of ['residualMppi', 'residualMppiLlm']) {
+    const cfg = buildConfig({ method, level: 1, seed: 1 });
+    const sim = new Sim(cfg, new Rover(cfg), new Terrain(cfg), 'adaptive');
+    for (let k = 0; k < 300; k++) sim.step();
+    assert.ok(sim.sgt, `${method} built its controller`);
+    assert.equal(sim.sgt.opts.releaseTime, 0.18);
+    assert.equal(sim.ledger.work.assist, 0);
+  }
+});

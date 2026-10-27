@@ -21,7 +21,17 @@ import {
   residualObservation, stageReward
 } from './residualMppi.js';
 
-export const CONTROL_SUBSTEPS = 25;                 // 25 x 2 ms = 50 ms = 20 Hz
+export const CONTROL_SUBSTEPS = 25;
+
+/** SGT options carried by the residual-MPPI parameter vector (gains + gait timing). */
+export function residualGaitOptions(P) {
+  const o = { gainKp: P.sgtGainKp, gainKd: P.sgtGainKd };
+  if (Number.isFinite(P.sgtSettleSpeed)) o.settleSpeed = P.sgtSettleSpeed;
+  if (Number.isFinite(P.sgtSettleMinTime)) o.settleMinTime = P.sgtSettleMinTime;
+  if (Number.isFinite(P.sgtSettleMaxTime)) o.settleMaxTime = P.sgtSettleMaxTime;
+  if (Number.isFinite(P.sgtReleaseTime)) o.releaseTime = P.sgtReleaseTime;
+  return o;
+}                 // 25 x 2 ms = 50 ms = 20 Hz
 const clip = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 
 function segmentDistance(p, a, b) {
@@ -46,7 +56,7 @@ export function buildEnvConfig(spec, hook, P) {
   const variant = spec.variant || 'residual';
   cfg.controllerMode = variant === 'sgt' ? 'sgt_tipping' : 'residual_mppi';
   cfg.residualMppi = hook;
-  cfg.sgtOptions = { ...(cfg.sgtOptions || {}), gainKp: P.sgtGainKp, gainKd: P.sgtGainKd };
+  cfg.sgtOptions = { ...(cfg.sgtOptions || {}), ...residualGaitOptions(P) };
   // Tension shield inside every rollout: payload tension >= minCableTensionN, outer tension <= maxCableTensionN.
   cfg.tensionShield = spec.shield === false ? false : { coreTensionMin: P.minCableTensionN, outerTensionMax: P.maxCableTensionN };
   if (spec.target) { cfg.targetDestination = spec.target.slice(); cfg.targetGoalY = spec.target[1]; }
