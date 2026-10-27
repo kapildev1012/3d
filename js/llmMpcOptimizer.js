@@ -307,9 +307,15 @@ export class LlmMpcCoDesigner {
    */
   decide(entry) {
     const best = this.archive.best();
-    if (entry.safety.overload) return { rollback: true, reason: `outer-cable overload ${entry.safety.maxOuterTensionN.toFixed(0)} N > ${SAFETY.maxOuterTensionN} N`, to: best };
+    if (entry.safety.overload) {
+      const reason = `outer-cable overload ${entry.safety.maxOuterTensionN.toFixed(0)} N > ${SAFETY.maxOuterTensionN} N`;
+      // No safe checkpoint yet (e.g. the very first evaluation overloads): nothing to roll back
+      // to, so keep going and let the tuner push the parameters toward the safe set.
+      if (!best) return { rollback: false, reason: `${reason}; no safe checkpoint to roll back to yet`, to: entry };
+      return { rollback: true, reason, to: best };
+    }
     const previousBest = this.history.filter(e => e !== entry && !e.safety.overload).reduce((m, e) => Math.max(m, e.safety.completion), -Infinity);
-    if (Number.isFinite(previousBest) && entry.safety.completion < previousBest-SAFETY.completionDropPts) {
+    if (best && Number.isFinite(previousBest) && entry.safety.completion < previousBest-SAFETY.completionDropPts) {
       return { rollback: true, reason: `mission completion fell ${entry.safety.completion.toFixed(1)}% < ${previousBest.toFixed(1)}%`, to: best };
     }
     if (best && best !== entry && entry.composite < best.composite-0.1*Math.abs(best.composite)) {

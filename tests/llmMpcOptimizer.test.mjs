@@ -161,3 +161,14 @@ test('OpenAI-compatible endpoint (Gemini / Groq / Ollama): json_object request, 
   assert.equal(out.source, 'compatible');
   assert.ok(out.updatedMpcConfig.maxResidualStrokeM <= 0.030);     // the model may never widen the residual stroke
 });
+
+test('decide(): an overloaded checkpoint with no safe checkpoint in the archive keeps going instead of rolling back to nothing', async () => {
+  const { LlmMpcCoDesigner, DEFAULT_MPC, DEFAULT_REWARD } = await import('../js/llmMpcOptimizer.js');
+  const d = new LlmMpcCoDesigner({ provider: 'offline' });
+  const row = { level: 1, disturbance: 'nominal', avgSpeedMs: 0.1, rmseM: 0.3, maxErrorM: 0.5, successRatePct: 100, maxOuterTensionN: 230, rodResidualMm: 0.01, relaxedCablesPct: 1, contactSlipMs: 0.1, costOfTransport: 10, controlEffortUtu: 0.1 };
+  const entry = d.record({ epoch: 0, mpc: DEFAULT_MPC, reward: DEFAULT_REWARD, digests: [row] });
+  assert.ok(entry.safety.overload);
+  const decision = d.decide(entry);
+  assert.equal(decision.rollback, false);
+  assert.equal(decision.to, entry);
+});
