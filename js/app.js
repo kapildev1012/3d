@@ -26,6 +26,7 @@ import {
 import { EXPERIMENT_SCHEMA, validateObject, validateSettingsFile } from './configSchema.js?v=20261021-ws1';
 import { SCENARIOS } from './experimentProtocol.js?v=20261021-ws1';
 import { BenchmarkPanel } from './benchmarkPanel.js?v=20261021-ws1';
+import { HybridPanel } from './hybridPanel.js?v=20261021-ws1';
 import { installMatlabTheme, setChartTheme, matlabLineOptions, matlabLine, xy, exportChartPNG, exportChartCSV, exportChartIEEE } from './matlabCharts.js?v=20261021-ws1';
 
 const Chart = window.Chart;
@@ -86,6 +87,7 @@ class App {
     this.initVisualizer();
     this.initCharts();
     this.benchmarkPanel = new BenchmarkPanel(Chart, charts => { this.benchmarkCharts = charts; });
+    this.hybridPanel = new HybridPanel();
     this.initMonitoringControls();
 
     this.recorder = new RunRecorder(this, this.persistence);
@@ -168,9 +170,10 @@ class App {
   obstacleCount() {
     const terrain = this.terrain;
     if (!terrain) return null;
-    if (terrain.course) return terrain.course.obstacles.length;
-    if (terrain.expeditionObstacles?.length) return terrain.expeditionObstacles.length;
-    return (terrain.rocks || []).filter(rock => rock.kind === 'challenge').length;
+    const field = terrain.obstacleField?.length || 0;     // solid 3D obstacles (all levels)
+    if (terrain.course) return terrain.course.obstacles.length+field;
+    if (terrain.expeditionObstacles?.length) return terrain.expeditionObstacles.length+field;
+    return (terrain.rocks || []).filter(rock => rock.kind === 'challenge').length+field;
   }
 
   /** Single entry point for play/pause; pause commits a durable checkpoint. */
@@ -258,7 +261,7 @@ class App {
    */
   applyTippingGaitStrokes() {
     const mode = this.cfg.controllerMode;
-    const tipping = mode === 'sgt_tipping' || mode === 'guided_policy' || (mode === 'mpc_gnss' && this.cfg.pureCableActuation);
+    const tipping = mode === 'sgt_tipping' || mode === 'guided_policy' || mode === 'residual_mppi' || mode === 'residual_mppi_llm' || (mode === 'mpc_gnss' && this.cfg.pureCableActuation);
     if (!tipping) return;
     Object.assign(this.cfg, { actuationDeltaL: 0.15, coreActuationDeltaL: 0.15, cableLinearVelocity: 0.20, coreCableLinearVelocity: 0.20 });
     const slider = document.getElementById('slider-actuation');
@@ -654,7 +657,7 @@ class App {
       ilqr: 'iLQR', ilqr_minimax: 'MM-iLQR', ilqr_minimax_penalty: 'MM-iLQR+P',
       qp_mpc: 'MPC', qp_mpc_payload: 'MPC+P', neural: 'NN',
       riccati_lqr: 'Ric-LQR', ilqr_true: 'iLQR-T',
-      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC', mpc_gnss: 'MPC+GNSS', guided_policy: 'MPC+GPS'
+      ilqr_minimax_true: 'MM-T', qp_mpc_proj: 'QP-MPC', mpc_gnss: 'MPC+GNSS', guided_policy: 'MPC+GPS', residual_mppi: 'MPC+RL', residual_mppi_llm: 'MPC+RL+LLM'
     };
     return map[mode] || mode || '—';
   }
@@ -1007,8 +1010,8 @@ class App {
     set(this.chartComPath, 0, history.comX.slice(pathStart).map((x, index) => ({ x, y: history.comY[pathStart+index] })));
     set(this.chartComPath, 1, [{ x: monitor.start[0], y: monitor.start[1] }]);
     set(this.chartComPath, 2, [{ x: monitor.goal[0], y: monitor.goal[1] }]);
-    const obstacles = this.terrain.course?.obstacles
-      || (this.terrain.rocks || []).filter(rock => rock.kind === 'challenge');
+    const obstacles = [...(this.terrain.course?.obstacles
+      || (this.terrain.rocks || []).filter(rock => rock.kind === 'challenge')), ...(this.terrain.obstacleField || [])];
     set(this.chartComPath, 3, obstacles.map(obstacle => ({ x: obstacle.x, y: obstacle.y })));
     this.chartComPath?.update('none');
 

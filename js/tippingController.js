@@ -288,7 +288,7 @@ export class SensitivityTippingController {
     const chosen = outer.slice().sort((a, b) => Math.abs(b.g)-Math.abs(a.g)).slice(0, this.opts.activeCables);
     const umax = cfg.actuationDeltaL;
     for (const item of chosen) {
-      cableTargets[item.act.index] = umax*Math.max(-this.opts.relaxLimit, Math.min(1, item.g/gMaxOuter));
+      cableTargets[item.act.index] = umax*Math.max(-this.opts.relaxLimit, Math.min(1, (this.opts.gainKp ?? 1)*item.g/gMaxOuter));
     }
     const coreMax = cfg.coreActuationDeltaL*this.opts.coreStrokeRatio;
     for (const item of coreActs) coreTargets[item.act.index] = coreMax*Math.max(-1, Math.min(1, item.g/gMaxCore));
@@ -410,8 +410,49 @@ export class SensitivityTippingController {
     } else if (this.state === 'SGT_RELEASE') {
       if (elapsed >= this.opts.releaseTime) this.enter('SGT_SETTLE');
     }
+    const active = this.state === 'SGT_SHIFT' || this.state === 'SGT_TIP';
+    if (active) command = this.smoothCommand(command);
+    else this.previousCommand = null;
+    if (active && this.opts.residual) command = this.applyResidual(command, direction, geometry);
     if (this.opts.shield) command = this.applyShield(command, direction);
     return { ...command, geometry, state: this.state };
+  }
+
+  /** First-order command smoothing (gainKd): u <- u_prev + (u - u_prev)/(1 + Kd). Kd = 0 is the identity. */
+  smoothCommand(command) {
+    const kd = this.opts.gainKd ?? 0;
+    const previous = this.previousCommand;
+    if (!(kd > 0) || !previous) {
+      this.previousCommand = { cableTargets: command.cableTargets.slice(), coreTargets: command.coreTargets.slice() };
+      return command;
+    }
+    const blend = (now, before) => now.map((u, k) => before[k]+(u-before[k])/(1+kd));
+    const out = { ...command, cableTargets: blend(command.cableTargets, previous.cableTargets),
+      coreTargets: blend(command.coreTargets, previous.coreTargets) };
+    this.previousCommand = { cableTargets: out.cableTargets.slice(), coreTargets: out.coreTargets.slice() };
+    return out;
+  }
+
+  /**
+   * Residual policy (js/residualMppi.js): u = clamp(u_nominal + du), with
+   * |du| <= maxResidualStrokeM per cable and the total stroke clamped to
+   * maxTotalStrokeM. The tension shield, if enabled, still filters the result.
+   */
+  applyResidual(command, direction, geometry) {
+    const sim = this.sim, cfg = sim.cfg;
+    const hook = this.opts.residual;
+    const act = typeof hook === 'function' ? hook : hook.act;
+    const cap = hook.maxResidualStrokeM ?? 0.030, total = hook.maxTotalStrokeM ?? 0.120;
+    const umax = cfg.actuationDeltaL, lo = -this.opts.relaxLimit*umax, hi = Math.min(umax, total);
+    const nominal = command.cableTargets;
+    const du = act({ sim, controller: this, geometry, direction, nominal, margin: this.lastPlan?.margin ?? 0,
+      state: this.state, elapsed: sim.t-this.enteredAt });
+    this.lastResidual = du ? Array.from(du) : null;
+    const cableTargets = nominal.map((u, k) => {
+      const d = du ? Math.max(-cap, Math.min(cap, du[k])) : 0;
+      return Math.max(lo, Math.min(hi, Math.min(u, hi)+d));
+    });
+    return { ...command, cableTargets };
   }
 
   /** Tension-certified safety filter (tensionShield.js) on the final command, in every state. */
@@ -425,9 +466,11 @@ export class SensitivityTippingController {
       sens.shiftGradient = sens.S.map(col => col[0]*normal[0]+col[1]*normal[1]);
     }
     const umax = cfg.actuationDeltaL, cmax = cfg.coreActuationDeltaL*this.opts.coreStrokeRatio;
+    // Residual-MPPI: the total commanded outer stroke stays within maxTotalStrokeM after filtering, too.
+    const outerHi = this.opts.residual ? Math.min(umax, this.opts.residual.maxTotalStrokeM ?? 0.120) : umax;
     const bounds = {
       lo: [...new Array(24).fill(-this.opts.relaxLimit*umax), ...new Array(12).fill(-cmax)],
-      hi: [...new Array(24).fill(umax), ...new Array(12).fill(cmax)]
+      hi: [...new Array(24).fill(outerHi), ...new Array(12).fill(cmax)]
     };
     const result = shieldCommand(sim, sens, command, bounds, typeof this.opts.shield === 'object' ? this.opts.shield : {});
     this.shieldInfo = result.info;

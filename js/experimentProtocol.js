@@ -27,6 +27,7 @@
  */
 
 import { SimConfig, TerrainModel, SphericalRoverModel, Simulation } from './simEngine.js?v=20261021-ws1';
+import { residualTunedParams } from './residualDeploy.js?v=20261021-ws1';
 
 export const METHODS = Object.freeze({
   sgt: {
@@ -56,6 +57,21 @@ export const METHODS = Object.freeze({
   guidedPolicy: {
     label: 'MPC + GPS: MPC-guided policy search (learned policy)', short: 'MPC+GPS',
     configure: cfg => { cfg.applyResearchProfile(); cfg.controllerMode = 'guided_policy'; }
+  },
+  residualMppi: {
+    label: 'MPC + RL: residual-MPPI actor on SGT (default MPC/reward, tension shield)', short: 'MPC+RL',
+    configure: cfg => {
+      cfg.applyResearchProfile(); cfg.controllerMode = 'residual_mppi';
+      cfg.tensionShield = { coreTensionMin: 10, outerTensionMax: 150 };
+    }
+  },
+  residualMppiLlm: {
+    label: 'MPC + RL + LLM: residual-MPPI actor with LLM-co-designed MPC/reward (tension shield)', short: 'MPC+RL+LLM',
+    configure: cfg => {
+      cfg.applyResearchProfile(); cfg.controllerMode = 'residual_mppi_llm';
+      const tuned = residualTunedParams('residual_mppi_llm');
+      cfg.tensionShield = { coreTensionMin: tuned.minCableTensionN ?? 10, outerTensionMax: Math.min(150, tuned.maxCableTensionN ?? 150) };
+    }
   },
   sgtShield: {
     label: 'SGT + tension-certified safety filter', short: 'SGT+shield',

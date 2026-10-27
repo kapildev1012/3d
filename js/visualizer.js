@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { addObstacleFieldMeshes } from './obstacleRenderer.js?v=20261021-ws1';
 
 // ── Procedural texturing helpers (photoreal Mars surface treatment) ──
 
@@ -736,6 +737,16 @@ export class Visualizer {
         label.position.set(this.laneOffset, y, beaconGroundZ+1.85);
         this.scene.add(label);
       }
+    }
+
+    // Solid 3D obstacle field (all levels; js/obstacleField.js). Physics is lane-local,
+    // so the same list is drawn once per lane: Model A and Model B face identical obstacles.
+    if (this.terrainModel.obstacleField?.length) {
+      this.obstacleGroup = addObstacleFieldMeshes(THREE, this.scene, this.terrainModel.obstacleField, {
+        laneOffsets: [-this.laneOffset, this.laneOffset],
+        adaptiveLaneOffset: this.laneOffset,
+        createTextSprite: (text, color) => this.createTextSprite(text, color)
+      });
     }
 
     // ── Unified anchored surface scatter ──

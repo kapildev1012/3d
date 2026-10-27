@@ -420,3 +420,11 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
   .progress-bar { flex-basis: 120px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Hybrid training block (Comparative benchmark tab) */
+.hybrid-panel { margin-top: 14px; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px 12px; }
+.hybrid-panel > summary { cursor: pointer; font-weight: 600; }
+.hybrid-panel h4 { margin: 10px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.hybrid-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px 20px; }
+.hybrid-best td { font-weight: 600; }
+@media (max-width: 900px) { .hybrid-grid { grid-template-columns: 1fr; } }

@@ -138,6 +138,59 @@ Shipped policy, trained for 8 iterations (114k labelled actuator samples) and ev
 
 The policy reaches 90 % of SGT's progress without solving the KKT model every tick. It still uses one sensitivity solve per tip cycle to choose a feasible edge (`cfg.guidedPolicy.edgeSelection = 'alignment'` drops that, at a cost in progress). It is not faster than SGT on this small structure.
 
+## MPC + RL: parallel residual-MPPI, twin critic and LLM co-designer
+
+Controller `residual_mppi` ("MPC + RL" in the controller menu, `residualMppi` in the benchmark) is the SGT
+tipping gait plus a learned, bounded residual, always cable-only (assist share 0) and normally behind the
+tension shield:
+
+    u = clip( u_SGT + du ),   |du| <= 0.030 m per cable,   total stroke <= 0.120 m
+
+Three tiers (all in `js/`, driver `tools/run_hybrid_training.mjs`):
+
+1. **Zero-copy worker pool** (`parallelPool.js`, `parallelWorker.js`, `residualEnv.js`, `simSnapshot.js`).
+   One headless 500 Hz DAE simulation per `worker_threads` worker (Node) or Web Worker (browser). After the
+   bootstrap message every exchange is shared memory: `Atomics.wait/notify` command words, `Float64Array` views
+   for 48-D observations, 24-D noise, 17-D telemetry and a checkpoint slot. A tick is 25 DAE sub-steps (20 Hz).
+   `serializeState` / `deserializeState` snapshot the full dynamic state (DAE, energy ledger, SGT state
+   machine, actuator-delay queue, RNGs, Level 1-14 crest-checkpoint tracker); restore is bit-exact, also into a
+   fresh simulator through bytes (`tests/simSnapshot.test.mjs`). In the browser the page must be cross-origin
+   isolated; `server.mjs` and `vercel.json` send COOP `same-origin` + COEP `credentialless`.
+2. **Residual-MPPI + twin critic** (`residualMppi.js`, `mppiPlanner.js`). The actor maps the 48-D observation to
+   6 *synergies* (one per strut: pull the four cables at one strut end, release the four at the other) plus a
+   24-D fine residual, `du = 0.030 tanh(0.7 M' tanh z + 0.3 r)`; heads start at zero so an untrained actor is
+   exactly the SGT command. Every 10 ticks (0.5 s) env 0 publishes a checkpoint, K structured noise sequences are
+   rolled out in parallel from it (tension shield inside the loop), scored by the physics reward plus
+   `gamma^H min(V1, V2)(s_H)` and combined with exponential weights. The weighted noise is executed, the actor is
+   distilled from the executed actions and the twin critic is trained by TD(0) and the MPPI return.
+3. **LLM MPC / reward co-designer** (`llmMpcOptimizer.js`, `llmSystemPrompt.js`). After each epoch the
+   stress-matrix digest (v̄, RMSE, max|e|, t_rec, ∫uᵀu, CoT, t_solve, success, rod residual, relaxed cables,
+   contact slip; nominal, push, gaussian, laplace, outlier, stiffness -20 %, friction -40 %, payload +30 %,
+   delay 100 ms) and the Pareto history go to an LLM with a strict JSON schema (`MpcAndRewardUpdateSchema`).
+   The reply updates the MPC cost weights, SGT gains, shield bounds and RL reward weights, is validated and
+   clamped to a safe box (the model can only *shrink* the residual stroke), and a Pareto archive reverts to the best
+   checkpoint when completion drops or an outer cable exceeds 180 N. Without a key, or if a call fails, a
+   deterministic rule tuner implementing the same five diagnostic rules is used.
+
+```
+npm run hybrid                                    # full pipeline (all cores)
+npm run hybrid:quick                              # 1 epoch smoke run
+node tools/run_hybrid_training.mjs --epochs 8 --workers 9 --candidates 16 --matrix full --seeds 1,2,3
+npm run experiments -- --train-hybrid --epochs 4  # same pipeline through the experiment runner
+npm run experiments -- --only hybrid              # SGT vs SGT+shield vs residual-MPPI actor, paper protocol
+```
+
+LLM credentials come from the environment only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `LLM_API_KEY`;
+optional `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_URL`) and are never logged or stored. Only the numeric
+digest above is sent. Outputs: `js/residualMppiWeights.js` (best checkpoint, loaded by the UI),
+`results/hybrid/` (per-epoch JSON, summary, `comparative_benchmark.md`) and `public/hybrid/summary.json`
+(shown in *Comparative benchmark > Hybrid training*, which can also run the parallel search live in Web Workers).
+
+Mapping of the tunables to this code base: `q*`/`r*` are the stage-cost weights of the MPPI return,
+`minCableTensionN` / `maxCableTensionN` are the tension-shield bounds (payload cables >= min, outer cables <=
+max), `sgtGainKp` scales the normalized COM-sensitivity gradient before the stroke clip (1 = unit gain),
+`sgtGainKd` is first-order command smoothing `u <- u_prev + (u - u_prev)/(1 + Kd)`.
+
 ## Tension shield (suspension-integrity safety filter)
 
 **Finding.** While the shell rolls, gravity and the outer-cable actuation compress it (the centroid drops about 15 %). The node-to-payload distances shrink, and the 12 payload suspension cables lose their pretension. Without a filter, payload cables are slack about 35 % of the time, and in every sample at least one is slack. The "suspended" payload is loose in the cage.
@@ -186,3 +239,22 @@ The simulated icosahedral shape (d/h = 1/φ) has no self-stress state. The stati
 ```bash
 npm run build
 ```
+
+## Solid 3D obstacles on every level (1–14)
+
+Every level now has deterministic, physically collidable 3D obstacles, identical for Model A (Baseline) and Model B (Adaptive). The two lanes collide against and render the same list.
+
+| Module | What it does |
+|---|---|
+| `js/obstacleField.js` | `buildObstacleFieldForLevel(levelId, roughnessRms, seed, course)` is a seeded generator. It produces `box` OBBs (crates, step ledges, low walls, narrow gate pillars), `rock` jagged basalt boulders (sphere-swept lobe clusters), `cylinder` fallen pipes and rubble rollers, and `ramp` inclined wedges. It keeps a 2.5 m clear spawn pad around the start. Every obstacle is anchored to the heightfield, and the obstacles are re-seated whenever the terrain is regenerated (the roughness slider calls `generateSurface()`). Each kind has an exact signed distance function and an analytic normal. |
+| `js/obstacleContact.js` | Contact for 12 rod end-nodes, 3 quadrature points per strut (18) and the payload core. It runs after the constraint corrector in both Legacy SHAKE and the 500 Hz DAE. It projects along the SDF normal by translating the whole rod, so rod lengths are preserved exactly. Restitution is e = 0.02 (locked), with Coulomb friction impulses. Contact can never add energy, and its work is booked as `contact` in the Physics Audit ledger, so DAE \|ε\| stays at about 1e-9 J. |
+| `js/obstacleRenderer.js` | Chamfered crates and concrete blocks with edge highlights, displaced flat-shaded basalt dodecahedrons, pipes and ramps. Shadows are on. Cyan checkpoint rings and `CP` tags sit on every obstacle that must be crested. |
+| `js/obstacleTracker.js` | Over/around classification per model. It feeds `OBSTACLES: X over / Y around` and `BYPASS VIOL.` in the HUD cards and the dock tables. A bypass violation means Model B went around an obstacle it should have crested; gates, walls and tall offset rocks may legally be passed around. |
+
+Set `cfg.obstacleField = false` to turn the field off (e.g. for legacy benchmark comparisons).
+
+## LLM co-designer endpoints
+
+`tools/run_hybrid_training.mjs` reads a local `.env` (git-ignored; see `.env.example`). With `VITE_LLM_API_URL`, `VITE_LLM_API_KEY` and `VITE_LLM_MODEL` it calls any OpenAI-compatible chat/completions endpoint (Gemini, Groq, or a local Ollama) with `response_format: json_object`. The reply is parsed, schema-validated and clamped. Without these, it uses `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and otherwise falls back to the offline rule-based tuner. Keys are never printed or stored in results.
+
+Controllers: **MPC + RL** (`residual_mppi`, trained with `npm run hybrid:rl`, MPC/reward fixed) and **MPC + RL + LLM** (`residual_mppi_llm`, trained with `npm run hybrid`, co-designed by the LLM).

@@ -7,6 +7,7 @@ import { relaxedCableTension } from './driveControllers.js?v=20261021-ws1';
 import { GnssMpcNavigator } from './gnssNavigation.js?v=20261021-ws1';
 import { GuidedPolicy, solveTeacherQp, actuatorBounds } from './guidedPolicySearch.js?v=20261021-ws1';
 import { GUIDED_POLICY_WEIGHTS } from './guidedPolicyWeights.js?v=20261021-ws1';
+import { residualHookFor, residualTunedParams, isResidualMode } from './residualDeploy.js?v=20261021-ws1';
 
 let sharedGuidedPolicy = null;
 /** Policy used by controllerMode 'guided_policy' (cfg.guidedPolicy.policy overrides the trained weights). */
@@ -25,6 +26,9 @@ import {
 import { mergeMonitoringSettings, RealtimeMonitor } from './monitoringSystem.js?v=20261021-ws1';
 import { ShellDAE, flatten, unflatten } from './lagrangianDae.js?v=20261021-ws1';
 import { SensitivityTippingController } from './tippingController.js?v=20261021-ws1';
+import { buildObstacleFieldForLevel, anchorObstacleField } from './obstacleField.js?v=20261021-ws1';
+import { resolveObstacleContacts } from './obstacleContact.js?v=20261021-ws1';
+import { FieldObstacleTracker, mergeSummaries } from './obstacleTracker.js?v=20261021-ws1';
 
 export const LEVEL10_PERFORMANCE = Object.freeze({
   targetSpeed: 1.30,
@@ -1216,6 +1220,34 @@ export class TerrainModel {
     this.modes = modes;
 
     this.rebuildRockIndex();
+    this.rebuildObstacleField();
+  }
+
+  /**
+   * Solid 3D obstacle field (js/obstacleField.js) for every level. The layout is
+   * a pure function of (level, seed); elevations are re-anchored to the current
+   * heightfield, so this runs again whenever generateSurface() does (roughness
+   * slider, incline, level load). cfg.obstacleField = false disables it.
+   */
+  rebuildObstacleField() {
+    const cfg = this.cfg;
+    if (cfg.obstacleField === false) { this.obstacleField = []; return; }
+    const level = cfg.experimentId || 1;
+    const startY = (cfg.abCourseEnabled || level === 14) ? cfg.courseStartY-1.0 : 0;
+    const goalY = level === 14 ? (cfg.courseGoalY ?? cfg.targetGoalY) : cfg.targetGoalY;
+    const avoid = [...(this.course?.obstacles || []), ...(this.expeditionObstacles || [])]
+      .map(o => ({ y: o.y, halfLength: o.radiusY || 1 }));
+    const heightAt = (x, y) => this.eval(x, y).h;
+    const key = `${level}|${cfg.seed}|${startY}|${goalY}|${this.course ? 1 : 0}`;
+    if (this.obstacleField && this.obstacleFieldKey === key) {
+      // Same layout, new ground: re-seat the existing obstacles (roughness slider).
+      anchorObstacleField(this.obstacleField, heightAt, 0.02+0.5*Math.max(0, cfg.groundRMS || 0));
+      return;
+    }
+    this.obstacleField = buildObstacleFieldForLevel(level, cfg.groundRMS, cfg.seed ?? 1, {
+      startY, goalY, heightAt, avoid, corridorHalfWidth: cfg.pathCorridorHalfWidth || 1.25
+    });
+    this.obstacleFieldKey = key;
   }
 
   /**
@@ -1950,6 +1982,11 @@ export class Simulation {
     this.obstacleTracker = trackedCourse
       ? new ObstaclePassTracker(trackedCourse, this.modelType)
       : null;
+    // Solid obstacle field (all levels): identical list for Model A and Model B.
+    this.fieldObstacleTracker = this.terrain.obstacleField?.length
+      ? new FieldObstacleTracker(this.terrain.obstacleField, this.modelType)
+      : null;
+    this.lastObstacleContact = null;
     // The Level 14 expedition has no A/B course object, so it gets its own
     // waypoint chain: one beacon every 50 m between the start and goal lines.
     // These drive the HUD progress counter and the learner's checkpoint memory.
@@ -2036,7 +2073,8 @@ export class Simulation {
       goalReached: false,
       goalResult: null,
       learning: this.routeLearner?.snapshot(this.learningCommand) || null,
-      obstacleSummary: this.obstacleTracker?.summary() || null
+      obstacleSummary: mergeSummaries(this.obstacleTracker?.summary() || null, this.fieldObstacleTracker?.summary() || null),
+      obstacleContacts: 0, maxObstaclePenetration: 0, minObstacleClearance: Infinity
     };
 
     this.history = {
@@ -2478,27 +2516,10 @@ export class Simulation {
     // admissible tipping gait (the support-face gait barely rolls without aids).
     const gnssTipping = cfg.controllerMode === 'mpc_gnss' && cfg.pureCableActuation;
     const guided = cfg.controllerMode === 'guided_policy';
-    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gnssTipping || guided)) {
-      if (!this.sgt) {
-        const options = { ...(cfg.sgtOptions || {}) };
-        if (guided) {
-          // Guided policy search: deploy the learned policy, or (training) the
-          // MPC teacher regularized toward it.
-          const gp = cfg.guidedPolicy || {};
-          options.policy = gp.usePolicy === false ? null : guidedPolicyFor(cfg);
-          options.policyEdgeSelection = gp.edgeSelection || 'feasibility';
-          if (gp.teacher) {
-            const teacherOptions = { ...(typeof gp.teacher === 'object' ? gp.teacher : {}) };
-            options.teacher = { bounds: actuatorBounds, solve: args => solveTeacherQp(args, teacherOptions),
-              regularized: (teacherOptions.lambda || 0) > 0 };
-            options.onSample = gp.onSample || null;
-            options.executePolicy = Boolean(gp.executePolicy);
-          }
-        }
-        // Tension-certified safety filter (tensionShield.js) on any tipping controller.
-        if (cfg.tensionShield) options.shield = cfg.tensionShield === true ? {} : cfg.tensionShield;
-        this.sgt = new SensitivityTippingController(this, options);
-      }
+    const residualMppi = isResidualMode(cfg.controllerMode);
+    const residualLlm = cfg.controllerMode === 'residual_mppi_llm';
+    if (this.modelType === 'adaptive' && (cfg.controllerMode === 'sgt_tipping' || gnssTipping || guided || residualMppi)) {
+      if (!this.sgt) this.sgt = this.createSgt();
       const command = this.sgt.update(centroid, velocity, omega, desiredDirection);
       this.locomotionState = command.state;
       this.completedRolls = this.sgt.tipCount;
@@ -2512,9 +2533,11 @@ export class Simulation {
         coreTargets: command.coreTargets,
         rodTargets: new Array(this.rover.bars.length).fill(0),
         diagnostics: {
-          mode: guided ? 'guided_policy' : gnssTipping ? 'mpc_gnss' : 'sgt_tipping',
+          mode: guided ? 'guided_policy' : residualMppi ? cfg.controllerMode : gnssTipping ? 'mpc_gnss' : 'sgt_tipping',
           modeLabel: guided
             ? (cfg.guidedPolicy?.teacher ? 'MPC + GPS · MPC teacher (guided policy search)' : 'MPC + GPS · learned policy (guided policy search)')
+            : residualLlm ? 'MPC + RL + LLM · residual-MPPI on SGT, LLM-tuned MPC/reward (cable-only)'
+            : residualMppi ? 'MPC + RL · residual-MPPI on SGT (cable-only)'
             : gnssTipping ? 'MPC + GNSS heading · SGT tipping gait (cable-only)' : 'SGT · sensitivity-gradient tipping (cable-only)',
           gnss: gnssTipping && this.gpsState ? this.gpsDiagnostics() : null,
           desiredDirection,
@@ -3127,6 +3150,39 @@ export class Simulation {
     let tension = elastic+dampForce;
 
     return Math.max(0.0, Math.min(this.cfg.maxCableTensionSafety, Number.isFinite(tension) ? tension : 0.0));
+  }
+
+  /** Builds the tipping controller for the configured mode (also used by js/simSnapshot.js). */
+  createSgt() {
+    const cfg = this.cfg;
+    const guided = cfg.controllerMode === 'guided_policy';
+    const options = { ...(cfg.sgtOptions || {}) };
+    if (guided) {
+      // Guided policy search: deploy the learned policy, or (training) the
+      // MPC teacher regularized toward it.
+      const gp = cfg.guidedPolicy || {};
+      options.policy = gp.usePolicy === false ? null : guidedPolicyFor(cfg);
+      options.policyEdgeSelection = gp.edgeSelection || 'feasibility';
+      if (gp.teacher) {
+        const teacherOptions = { ...(typeof gp.teacher === 'object' ? gp.teacher : {}) };
+        options.teacher = { bounds: actuatorBounds, solve: args => solveTeacherQp(args, teacherOptions),
+          regularized: (teacherOptions.lambda || 0) > 0 };
+        options.onSample = gp.onSample || null;
+        options.executePolicy = Boolean(gp.executePolicy);
+      }
+    }
+    // Residual-MPPI + RL: SGT nominal command plus a bounded learned residual.
+    // 'residual_mppi' = MPC + RL (default parameters); 'residual_mppi_llm' = MPC + RL + LLM
+    // (actor and gait/shield parameters chosen by the LLM co-designer loop).
+    if (isResidualMode(cfg.controllerMode)) {
+      options.residual = residualHookFor(this, cfg.controllerMode);
+      const tuned = residualTunedParams(cfg.controllerMode);
+      if (tuned.sgtGainKp !== undefined && options.gainKp === undefined) options.gainKp = tuned.sgtGainKp;
+      if (tuned.sgtGainKd !== undefined && options.gainKd === undefined) options.gainKd = tuned.sgtGainKd;
+    }
+    // Tension-certified safety filter (tensionShield.js) on any tipping controller.
+    if (cfg.tensionShield) options.shield = cfg.tensionShield === true ? {} : cfg.tensionShield;
+    return new SensitivityTippingController(this, options);
   }
 
   step() {
@@ -3752,6 +3808,7 @@ export class Simulation {
     // Final hard collision projection catches sub-millimetre roundoff.
     const terrainProjection = this.enforceTerrainNonPenetration(passiveContact);
     if (ledgerOn) ledgerMark = this.bookProjection('contact', ledgerMark);
+
     for (const component of ['nodes', 'bars', 'outerCables', 'core', 'coreCables']) {
       this.metrics.minimumTerrainClearances[component] = Math.min(
         this.metrics.minimumTerrainClearances[component],
@@ -3898,6 +3955,45 @@ export class Simulation {
         this.ledger.correctorIterations += correctorInfo.iters;
         this.ledger.maxCorrectorIterations = Math.max(this.ledger.maxCorrectorIterations, correctorInfo.iters);
       }
+    }
+
+    // Solid obstacles (js/obstacleContact.js), after the constraint corrector: 12 nodes + 18 strut quadrature points
+    // + payload core vs the SDF obstacle field, e = 0.02, Coulomb friction. Same call
+    // for the Legacy SHAKE and 500 Hz DAE cores; its whole energy change is booked
+    // as contact work so E(t) = E0 + sum W(t) stays closed.
+    if (cfg.enableGround && this.terrain.obstacleField?.length) {
+      const energyBefore = ledgerOn ? ledgerMark : null;
+      const obstacleContact = resolveObstacleContacts(this, this.terrain.obstacleField);
+      this.lastObstacleContact = obstacleContact;
+      // Hard contact may not add energy. Position projection can lift a node along a
+      // sloped face (raising V) without removing matching kinetic energy; any such gain
+      // is taken out of the kinetic energy by a uniform velocity scaling (which keeps
+      // the rod-rate constraints Rq qdot = 0), so obstacle contact work is always <= 0.
+      if (ledgerOn && obstacleContact.contacts) {
+        const energyAfter = this.ledgerEnergy();
+        const gain = energyAfter-energyBefore;
+        if (gain > 0) {
+          const saved = this.v.map(w => w.slice()), savedCore = this.coreVelocity.slice();
+          for (const w of this.v) w.fill(0);
+          this.coreVelocity.fill(0);
+          const potentialOnly = this.ledgerEnergy();
+          this.v.forEach((w, i) => { w[0] = saved[i][0]; w[1] = saved[i][1]; w[2] = saved[i][2]; });
+          this.coreVelocity.splice(0, 3, ...savedCore);
+          const kinetic = energyAfter-potentialOnly;
+          const scale = kinetic > gain ? Math.sqrt((kinetic-gain)/kinetic) : 0;
+          for (const w of this.v) { w[0] *= scale; w[1] *= scale; w[2] *= scale; }
+          for (let a = 0; a < 3; a++) this.coreVelocity[a] *= scale;
+          obstacleContact.energyClamp = gain;
+        }
+      }
+      if (obstacleContact.contacts) {
+        this.metrics.obstacleContacts = (this.metrics.obstacleContacts || 0)+obstacleContact.contacts;
+        this.metrics.maxObstaclePenetration = Math.max(this.metrics.maxObstaclePenetration || 0, obstacleContact.maxPenetration);
+      }
+      if (Number.isFinite(obstacleContact.minClearance)) {
+        this.metrics.minObstacleClearance = Math.min(this.metrics.minObstacleClearance ?? Infinity, obstacleContact.minClearance);
+      }
+      if (ledgerOn) ledgerMark = this.bookProjection('contact', ledgerMark);
     }
     if (ledgerOn) {
       this.ledger.E = ledgerMark;
@@ -4059,9 +4155,13 @@ export class Simulation {
     if (kineticEnergy > this.metrics.peakKineticEnergy) this.metrics.peakKineticEnergy = kineticEnergy;
     if (slipSpeed > this.metrics.maxSlipSpeed) this.metrics.maxSlipSpeed = slipSpeed;
     this.metrics.completedRolls = this.completedRolls;
-    if (this.obstacleTracker) {
+    if (this.obstacleTracker || this.fieldObstacleTracker) {
       const baseHeight = this.terrain.evalBase(cx, cy).h;
-      this.metrics.obstacleSummary = this.obstacleTracker.update({ x: cx, y: cy, z: cz, baseHeight, time: this.t });
+      const courseSummary = this.obstacleTracker
+        ? this.obstacleTracker.update({ x: cx, y: cy, z: cz, baseHeight, time: this.t }) : null;
+      const fieldSummary = this.fieldObstacleTracker
+        ? this.fieldObstacleTracker.update({ x: cx, y: cy, touches: this.lastObstacleContact?.touches }) : null;
+      this.metrics.obstacleSummary = mergeSummaries(courseSummary, fieldSummary);
       this.metrics.successfulObstacles = this.metrics.obstacleSummary.over;
       this.metrics.failedAttempts = this.metrics.obstacleSummary.retries;
     }

@@ -20,3 +20,7 @@ Tensegrity_Finite_Element_Method_TsgFEM-main/
 
 # guided-policy-search scratch episodes
 results/guided_policy/tmp/
+
+# local secrets (LLM API keys)
+.env
+.env.local

@@ -89,6 +89,8 @@
       <select id="select-controller" class="select select-wide">
         <option value="natural_support_face" selected>Natural support-face gait</option>
         <option value="sgt_tipping">SGT · sensitivity-gradient tipping</option>
+        <option value="residual_mppi">MPC + RL · learned residual on SGT (cable-only)</option>
+        <option value="residual_mppi_llm">MPC + RL + LLM · learned residual, LLM-tuned MPC/reward (cable-only)</option>
         <optgroup label="Drive-ported solvers">
           <option value="riccati_lqr">LQR · Riccati backward pass</option>
           <option value="ilqr_true">iLQR · nonlinear rollout</option>
@@ -606,6 +608,8 @@
         <label class="check"><input type="checkbox" name="bench-method" value="mpc"> QP-MPC effort</label>
         <label class="check"><input type="checkbox" name="bench-method" value="mpcGnss"> MPC + GNSS (satellite positioning)</label>
         <label class="check"><input type="checkbox" name="bench-method" value="guidedPolicy"> MPC + GPS (guided policy search)</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="residualMppi"> MPC + RL (residual-MPPI + shield)</label>
+        <label class="check"><input type="checkbox" name="bench-method" value="residualMppiLlm"> MPC + RL + LLM (LLM-tuned MPC/reward)</label>
         <label class="check"><input type="checkbox" name="bench-method" value="sgtShield"> SGT + tension shield</label>
         <label class="check"><input type="checkbox" name="bench-method" value="policyShield"> MPC + GPS + tension shield</label>
         <label class="check"><input type="checkbox" name="bench-method" value="legacyAssisted"> Legacy + assists †</label>
@@ -642,6 +646,35 @@
     <p class="hint">† Legacy engine with roll couple / traction / grip / corridor aids: not physically admissible; shown for reference, excluded from bold “best” marks.</p>
     <textarea id="bench-latex" hidden class="input" rows="8" aria-label="LaTeX table"></textarea>
     <div id="bench-figure-grid" class="figure-grid"></div>
+    <details id="hybrid-panel" class="hybrid-panel">
+      <summary>Hybrid training · parallel residual-MPPI + twin critic + LLM MPC/reward co-designer</summary>
+      <p class="hint" id="hybrid-status" role="status">Loading…</p>
+      <p class="hint" id="hybrid-env"></p>
+      <div class="hybrid-grid">
+        <div>
+          <h4>Epochs (Pareto archive, automatic rollback)</h4>
+          <table class="table bench-table"><thead><tr><th>Epoch</th><th>Score</th><th>Completion</th><th>Max outer T</th><th>Pareto</th><th></th></tr></thead><tbody id="hybrid-history"></tbody></table>
+        </div>
+        <div>
+          <h4>Tuned MPC / SGT / shield / reward parameters</h4>
+          <table class="table bench-table"><tbody id="hybrid-params"></tbody></table>
+        </div>
+      </div>
+      <h4>Stress-matrix digest: SGT vs MPC + RL vs MPC + RL + LLM (cable-only, tension shield on)</h4>
+      <div class="table-scroll">
+        <table class="table audit-table bench-table">
+          <thead><tr><th>Level</th><th>Disturbance</th><th>Controller</th><th>v̄ (m/s)</th><th>RMSE (m)</th><th>max |e| (m)</th><th>t<sub>rec</sub> (s)</th><th>∫uᵀu dt</th><th>CoT</th><th>t<sub>solve</sub> (ms)</th><th>Success (%)</th><th>rod res. (mm)</th><th>relaxed cables (%)</th><th>slip (m/s)</th></tr></thead>
+          <tbody id="hybrid-table"><tr><td colspan="14" class="muted">No results.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="panel-actions">
+        <label for="hybrid-demo-duration" class="hint">Parallel search demo (Web Workers + SharedArrayBuffer), simulated seconds</label>
+        <input id="hybrid-demo-duration" type="number" min="2" max="20" value="5" class="input exp-input w-num">
+        <button type="button" id="hybrid-demo-run" class="btn">Run parallel MPPI</button>
+        <button type="button" id="hybrid-demo-stop" class="btn" disabled>Stop</button>
+      </div>
+      <p class="hint" id="hybrid-demo-status" role="status">Idle.</p>
+    </details>
   </div>
 </section>
 

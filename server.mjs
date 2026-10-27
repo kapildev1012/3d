@@ -116,7 +116,11 @@ async function handleStatic(req, res, pathname) {
       'Content-Length': stat.size,
       // Modules are cache-busted with ?v=...; HTML must always revalidate.
       'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=60',
-      'X-Content-Type-Options': 'nosniff'
+      'X-Content-Type-Options': 'nosniff',
+      // Cross-origin isolation: SharedArrayBuffer for the parallel residual-MPPI worker pool.
+      // `credentialless` keeps the Google Fonts / jsDelivr tags working without CORP headers.
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless'
     });
     if (req.method === 'HEAD') return res.end();
     createReadStream(file).pipe(res);
