@@ -8,16 +8,32 @@
  *   tier 3  closed-loop LLM MPC / reward co-designer with Pareto rollback
  *           (js/llmMpcOptimizer.js)
  *
- *   node tools/run_hybrid_training.mjs [--epochs 4] [--workers N] [--candidates 8]
- *        [--train-episodes 2] [--train-duration 10] [--eval-duration 10]
- *        [--matrix quick|full] [--seeds 1] [--llm auto|anthropic|openai|offline]
- *        [--resume] [--out results/hybrid]
+ *   node tools/run_hybrid_training.mjs [--outer-rounds 3] [--inner-episodes 500]
+ *        [--episode-duration 5] [--min-inner-steps 100000] [--workers N] [--candidates 8]
+ *        [--eval-duration 10] [--matrix quick|full] [--seeds 1]
+ *        [--llm auto|anthropic|openai|compatible|offline] [--no-tuner]
+ *        [--checkpoint-every 25] [--resume] [--out results/hybrid]
+ *   (--epochs / --train-episodes / --train-duration are accepted as aliases)
  *
- * Each epoch: (a) MPPI training episodes, (b) multi-seed evaluation of the
- * actor over the stress matrix, (c) LLM / rule update of MPC and reward
- * weights, with automatic rollback to the best Pareto checkpoint. The best
- * checkpoint is written to js/residualMppiWeights.js and the Comparative
- * benchmark table to results/hybrid/.
+ * Two nested loops:
+ *
+ *   INNER LOOP (fast learning, >= --min-inner-steps physics steps per round):
+ *     --inner-episodes MPPI-guided episodes on the shared-memory worker pool,
+ *     domain-randomised over levels 1-13 (solid obstacles on) and the stress
+ *     scenarios. Every 0.5 s plan: K rollouts at 500 Hz DAE / 20 Hz control,
+ *     then actor distillation + twin-critic TD updates. The MPC weights and the
+ *     reward are FIXED inside a round. Progress is checkpointed every
+ *     --checkpoint-every episodes so a long round can be resumed.
+ *
+ *   OUTER LOOP (meta-control, once per round = every 500-1000 episodes):
+ *     stress-matrix evaluation of the actor, aggregated failure modes of the
+ *     round's episodes (cable slack, rod residual, slip, overload, aborts,
+ *     success), then the LLM (or the rule tuner) updates the MPC weights,
+ *     gait timing and reward weights; Pareto archive + automatic rollback.
+ *
+ * The best checkpoint is written to js/residualMppiWeights.js (or
+ * js/residualMppiWeightsRl.js with --no-tuner) and the Comparative benchmark
+ * table to results/hybrid/.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -34,11 +50,14 @@ const args = process.argv.slice(2);
 const opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i >= 0 && args[i+1] && !args[i+1].startsWith('--') ? args[i+1] : fallback; };
 const flag = name => args.includes(`--${name}`);
 
-const epochs = Number(opt('epochs', 4));
+const epochs = Number(opt('outer-rounds', opt('epochs', 3)));
 const workers = Math.max(2, Number(opt('workers', Math.min(os.cpus().length, 9))));
 const K = Number(opt('candidates', 8));
-const trainEpisodes = Number(opt('train-episodes', 2));
-const trainDuration = Number(opt('train-duration', 10));
+const trainEpisodes = Number(opt('inner-episodes', opt('train-episodes', 500)));
+const trainDuration = Number(opt('episode-duration', opt('train-duration', 5)));
+const minInnerSteps = Number(opt('min-inner-steps', 100000));
+const checkpointEvery = Number(opt('checkpoint-every', 25));
+const PHYSICS_HZ = 500;
 const evalDuration = Number(opt('eval-duration', 10));
 const matrixKind = opt('matrix', 'quick');
 const seeds = opt('seeds', '1').split(',').map(Number);
@@ -47,7 +66,10 @@ const seeds = opt('seeds', '1').split(',').map(Number);
 // checkpoint js/residualMppiWeightsRl.js used by controllerMode 'residual_mppi'.
 const noTuner = flag('no-tuner');
 const outDir = path.resolve(root, opt('out', noTuner ? 'results/hybrid_rl' : 'results/hybrid'));
-const publicDir = path.join(root, 'public', noTuner ? 'hybrid_rl' : 'hybrid');
+// Only the default output folders publish to the UI and overwrite the deployed weights;
+// any other --out (smoke tests, sweeps) keeps everything inside that folder.
+const defaultOut = !args.includes('--out');
+const publicDir = defaultOut ? path.join(root, 'public', noTuner ? 'hybrid_rl' : 'hybrid') : path.join(outDir, 'public');
 const weightsFile = noTuner ? 'residualMppiWeightsRl.js' : 'residualMppiWeights.js';
 const weightsExport = noTuner ? 'RESIDUAL_MPPI_WEIGHTS_RL' : 'RESIDUAL_MPPI_WEIGHTS';
 mkdirSync(outDir, { recursive: true });
@@ -56,10 +78,15 @@ const log = (...a) => console.log('[hybrid]', ...a);
 const matrix = matrixKind === 'full'
   ? stressMatrix({ seeds })
   : stressMatrix({ levels: [1, 4], scenarios: ['nominal', 'push', 'friction', 'delay'], seeds });
-const trainSpecs = [
-  { level: 1, scenario: 'nominal', seed: 11 }, { level: 1, scenario: 'push', seed: 12 }, { level: 4, scenario: 'nominal', seed: 13 },
-  { level: 1, scenario: 'payload', seed: 14 }, { level: 1, scenario: 'friction', seed: 15 }, { level: 7, scenario: 'nominal', seed: 16 }
-];
+// Domain randomisation for the inner loop: levels 1-13 (solid obstacles on every level) x
+// stress scenarios x seeds, drawn deterministically per (round, episode).
+const TRAIN_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13];
+const TRAIN_SCENARIOS = ['nominal', 'nominal', 'push', 'gaussian', 'laplace', 'outlier', 'stiffness', 'friction', 'payload', 'delay'];
+const trainSpec = (round, episode) => {
+  let h = (round*7919+episode*104729+12345) >>> 0;
+  const next = () => { h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return h; };
+  return { level: TRAIN_LEVELS[next() % TRAIN_LEVELS.length], scenario: TRAIN_SCENARIOS[next() % TRAIN_SCENARIOS.length], seed: 1000+(next() % 100000) };
+};
 
 const cfg0 = new SimConfig({});
 const rover = new SphericalRoverModel(cfg0);
@@ -70,13 +97,14 @@ const designer = new LlmMpcCoDesigner({ provider: noTuner ? 'offline' : opt('llm
 log(`workers ${workers}, candidates ${K}, matrix ${matrixKind} (${matrix.length} runs), tuner: ${noTuner ? 'off (MPC + RL only)' : designer.provider}${designer.provider !== 'offline' ? ` (${designer.model})` : ''}`);
 
 let mpc = { ...DEFAULT_MPC }, reward = { ...DEFAULT_REWARD };
-let epochStart = 0;
+let epochStart = 0, episodeStart = 0, innerResume = null;
 const statePath = path.join(outDir, 'state.json');
 if (flag('resume') && existsSync(statePath)) {
   const st = JSON.parse(readFileSync(statePath, 'utf8'));
   model.load(st.model); mpc = st.mpc; reward = st.reward; epochStart = st.nextEpoch;
+  episodeStart = st.nextEpisode || 0; innerResume = st.inner || null;
   for (const e of st.history) designer.record({ epoch: e.epoch, mpc: e.mpc, reward: e.reward, digests: e.digests, extra: e.extra });
-  log(`resumed at epoch ${epochStart}`);
+  log(`resumed at round ${epochStart}, episode ${episodeStart}`);
 }
 
 const pool = new SharedVecTensegrityEnv({ numEnvs: workers, numCandidates: K, baseUrl: new URL('../js/parallelPool.js', import.meta.url).href });
@@ -107,42 +135,83 @@ if (epochStart === 0) {
   log(`epoch 0 (untrained actor = SGT-0.120): composite ${entry.composite.toFixed(2)}, completion ${entry.safety.completion.toFixed(0)}%`);
 }
 
+/** Aggregated failure modes of a round's training episodes (fed to the LLM meta-controller). */
+function innerSummary(inner) {
+  const n = Math.max(1, inner.episodes);
+  return {
+    episodes: inner.episodes, realPhysicsSteps: inner.realSteps, rolloutPhysicsSteps: inner.rolloutSteps,
+    successRatePct: 100*inner.success/n, meanProgressM: inner.progress/n, meanSpeedMs: inner.speed/n,
+    meanRelaxedCablesPct: inner.slack/n, maxRodResidualMm: inner.rodMax, meanSlipMs: inner.slip/n,
+    maxOuterTensionN: inner.maxOuter, overloadEpisodes: inner.overload, aborts: inner.aborts, tips: inner.tips,
+    meanEss: inner.ess/n, meanAdvantagePerPlan: inner.advantage/n, meanReturnPerPlan: inner.ret/n,
+    byLevel: Object.fromEntries(Object.entries(inner.byLevel).map(([k, v]) => [k, { episodes: v.n, successRatePct: 100*v.s/v.n, meanProgressM: v.p/v.n }])),
+    byScenario: Object.fromEntries(Object.entries(inner.byScenario).map(([k, v]) => [k, { episodes: v.n, successRatePct: 100*v.s/v.n, meanProgressM: v.p/v.n }]))
+  };
+}
+const freshInner = () => ({ episodes: 0, realSteps: 0, rolloutSteps: 0, success: 0, progress: 0, speed: 0, slack: 0, rodMax: 0, slip: 0,
+  maxOuter: 0, overload: 0, aborts: 0, tips: 0, ess: 0, advantage: 0, ret: 0, byLevel: {}, byScenario: {} });
+
+const trainer = new ResidualMppiTrainer(pool, model, { horizon: Math.round(mpc.horizonSteps), seed: 100+epochStart });
+const saveState = (nextEpoch, nextEpisode, inner) => writeFileSync(statePath, JSON.stringify({
+  nextEpoch, nextEpisode, inner, mpc, reward, model: model.toJSON(),
+  history: designer.history.map(e => ({ epoch: e.epoch, mpc: e.mpc, reward: e.reward, digests: e.digests, extra: e.extra }))
+}));
+
 for (let epoch = Math.max(1, epochStart); epoch <= epochs; epoch++) {
+  // ---------------- INNER LOOP: MPC weights and reward fixed for the whole round
   withParams(mpc, reward);
-  const trainer = new ResidualMppiTrainer(pool, model, { horizon: Math.round(mpc.horizonSteps), seed: 100+epoch });
-  trainer.criticSteps = epoch > 1 ? 1000 : 0;
-  const trainInfo = [];
-  for (let e = 0; e < trainEpisodes; e++) {
-    const spec = trainSpecs[((epoch-1)*trainEpisodes+e) % trainSpecs.length];
-    const r = await trainer.runEpisode(spec, trainDuration, {
-      onPlan: ({ cycle, cycles, plan, run }) => { if (cycle % 5 === 0) log(`  train ep ${e} cycle ${cycle+1}/${cycles} ess ${plan.ess.toFixed(1)} best-vs-nominal ${plan.advantage.toFixed(3)} (${minutes()} min)`); }
-    });
-    trainInfo.push({ spec, progress: r.digest.progressM, ess: r.meanEss, gain: r.meanGainOverNominal, advantage: r.meanAdvantage, synergyShare: r.synergyShare, violating: r.violatingCandidates });
-    log(`epoch ${epoch} train ${spec.scenario} L${spec.level}: progress ${r.digest.progressM.toFixed(2)} m, mean ESS ${r.meanEss.toFixed(1)}, best-candidate advantage ${r.meanAdvantage.toFixed(3)}/plan`);
+  trainer.opts.horizon = Math.round(mpc.horizonSteps);
+  const inner = epoch === epochStart && innerResume ? innerResume : freshInner();
+  const firstEpisode = epoch === epochStart ? episodeStart : 0;
+  const roundStart = Date.now();
+  let e = firstEpisode;
+  for (; e < trainEpisodes || inner.realSteps < minInnerSteps; e++) {
+    const spec = trainSpec(epoch, e);
+    const r = await trainer.runEpisode(spec, trainDuration);
+    const d = r.digest;
+    const real = r.ticks*25;
+    inner.episodes++; inner.realSteps += real; inner.rolloutSteps += real*(K-1);
+    const ok = d.progressM >= 1.0*trainDuration/20 ? 1 : 0;          // same pace as >= 1 m in 20 s
+    inner.success += ok; inner.progress += d.progressM; inner.speed += d.avgSpeedMs;
+    inner.slack += d.relaxedCablesPct || 0; inner.rodMax = Math.max(inner.rodMax, d.rodResidualMm || 0); inner.slip += d.contactSlipMs || 0;
+    inner.maxOuter = Math.max(inner.maxOuter, d.maxOuterTensionN || 0); inner.overload += (d.maxOuterTensionN || 0) > 180 ? 1 : 0;
+    inner.aborts += d.aborts || 0; inner.tips += d.tips || 0;
+    inner.ess += r.meanEss; inner.advantage += r.meanAdvantage; inner.ret += r.meanReturn;
+    for (const [bucket, key] of [[inner.byLevel, `L${spec.level}`], [inner.byScenario, spec.scenario]]) {
+      const b = bucket[key] || (bucket[key] = { n: 0, s: 0, p: 0 });
+      b.n++; b.s += ok; b.p += d.progressM;
+    }
+    if ((e+1) % checkpointEvery === 0 || e+1 === trainEpisodes) {
+      const rate = (inner.realSteps+inner.rolloutSteps)/Math.max(1e-3, (Date.now()-roundStart)/1000);
+      log(`round ${epoch} episode ${e+1}/${trainEpisodes}: real steps ${inner.realSteps.toLocaleString()}, rollout steps ${inner.rolloutSteps.toLocaleString()} (${Math.round(rate).toLocaleString()} steps/s), success ${(100*inner.success/inner.episodes).toFixed(0)}%, mean progress ${(inner.progress/inner.episodes).toFixed(2)} m, ESS ${(inner.ess/inner.episodes).toFixed(1)} (${minutes()} min)`);
+      saveState(epoch, e+1, inner);
+    }
   }
+  const innerStats = innerSummary(inner);
+
+  // ---------------- OUTER LOOP: evaluate, decide (keep / rollback), LLM meta-update
   const digests = await evaluate('residual');
   const entry = designer.record({ epoch, mpc, reward, digests, extra: snapshotModel() });
-  entry.train = trainInfo;
+  entry.train = innerStats;
   history.push(entry);
   const decision = designer.decide(entry);
-  log(`epoch ${epoch}: composite ${entry.composite.toFixed(2)}, completion ${entry.safety.completion.toFixed(0)}%, max outer ${entry.safety.maxOuterTensionN.toFixed(0)} N, Pareto ${entry.onFront ? 'front' : 'dominated'} -> ${decision.rollback ? `ROLLBACK (${decision.reason}) to epoch ${decision.to.epoch}` : 'keep'}`);
-  let context = { mpc, reward, digests };
+  log(`round ${epoch} (${inner.episodes} episodes, ${(inner.realSteps+inner.rolloutSteps).toLocaleString()} physics steps): composite ${entry.composite.toFixed(2)}, completion ${entry.safety.completion.toFixed(0)}%, max outer ${entry.safety.maxOuterTensionN.toFixed(0)} N, Pareto ${entry.onFront ? 'front' : 'dominated'} -> ${decision.rollback ? `ROLLBACK (${decision.reason}) to round ${decision.to.epoch}` : 'keep'}`);
+  let context = { mpc, reward, digests, innerLoop: innerStats };
   if (decision.rollback) {
     restoreModel(decision.to.extra);
     mpc = structuredClone(decision.to.mpc); reward = structuredClone(decision.to.reward);
-    context = { mpc, reward, digests: decision.to.digests };
+    context = { mpc, reward, digests: decision.to.digests, innerLoop: innerStats };
   }
   if (noTuner) {
     entry.proposal = { source: 'none', summary: 'tuner off: MPC/reward parameters held at defaults', mpc, reward, rolledBack: decision.rollback, reason: decision.reason };
   } else {
     const proposal = await designer.propose(context);
-    log(`  tuner (${proposal.source}): ${proposal.diagnosticSummary.slice(0, 300)}`);
+    log(`  meta-controller (${proposal.source}): ${proposal.diagnosticSummary.slice(0, 400)}`);
     entry.proposal = { source: proposal.source, summary: proposal.diagnosticSummary, mpc: proposal.updatedMpcConfig, reward: proposal.updatedRewardWeights, rolledBack: decision.rollback, reason: decision.reason };
     mpc = proposal.updatedMpcConfig; reward = proposal.updatedRewardWeights;
   }
-  writeFileSync(path.join(outDir, `epoch_${String(epoch).padStart(2, '0')}.json`), JSON.stringify({ epoch, mpc: entry.mpc, reward: entry.reward, digests: entry.digests, composite: entry.composite, safety: entry.safety, train: trainInfo, proposal: entry.proposal }, null, 1));
-  writeFileSync(statePath, JSON.stringify({ nextEpoch: epoch+1, mpc, reward, model: model.toJSON(),
-    history: designer.history.map(e => ({ epoch: e.epoch, mpc: e.mpc, reward: e.reward, digests: e.digests, extra: e.extra })) }));
+  writeFileSync(path.join(outDir, `epoch_${String(epoch).padStart(2, '0')}.json`), JSON.stringify({ epoch, mpc: entry.mpc, reward: entry.reward, digests: entry.digests, composite: entry.composite, safety: entry.safety, inner: innerStats, proposal: entry.proposal }, null, 1));
+  saveState(epoch+1, 0, null);
 }
 
 // ------------------------------------------------------------------ results
@@ -150,7 +219,7 @@ const best = designer.archive.best();
 restoreModel(best.extra);
 const bestParams = toParams(best.mpc, best.reward, model.params);
 model.params = bestParams;
-writeFileSync(path.join(root, 'js', weightsFile),
+writeFileSync(defaultOut ? path.join(root, 'js', weightsFile) : path.join(outDir, weightsFile),
   `/** Trained residual-MPPI actor (${noTuner ? 'MPC + RL, fixed parameters' : 'MPC + RL + LLM co-designer'}; written by tools/run_hybrid_training.mjs). null = untrained: zero residual, i.e. plain SGT. */\n` +
   `export const ${weightsExport} = ${JSON.stringify({ actor: model.actor.toJSON(), params: bestParams,
     meta: { trainedAt: new Date().toISOString(), tuner: noTuner ? 'off' : designer.provider, epochs, bestEpoch: best.epoch, composite: best.composite, llmProvider: designer.provider, matrix: matrixKind, evalDuration } })};\n`);
@@ -167,7 +236,7 @@ writeFileSync(path.join(outDir, 'comparative_benchmark.md'), benchmarkMarkdown(b
 mkdirSync(publicDir, { recursive: true });
 writeFileSync(path.join(publicDir, 'summary.json'), JSON.stringify(summary));
 writeFileSync(path.join(publicDir, 'comparative_benchmark.md'), benchmarkMarkdown(best.digests, baselines));
-log(`best epoch ${best.epoch}; wrote js/${weightsFile} and ${path.relative(root, outDir)}/ (${minutes()} min)`);
+log(`best epoch ${best.epoch}; wrote ${defaultOut ? `js/${weightsFile}` : path.relative(root, path.join(outDir, weightsFile))} and ${path.relative(root, outDir)}/ (${minutes()} min)`);
 await pool.terminate();
 
 function benchmarkMarkdown(finalRows, bases) {

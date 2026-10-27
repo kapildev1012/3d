@@ -319,14 +319,14 @@ export class LlmMpcCoDesigner {
   }
 
   /** Ask the model (or the rule tuner) for the next parameters. Always returns a validated, clamped update. */
-  async propose({ mpc, reward, digests }) {
+  async propose({ mpc, reward, digests, innerLoop = null }) {
     const current = { mpc, reward };
     const best = this.archive.best();
     const rows = digests.map(promptRow);
     let raw, source = this.provider;
     if (this.provider === 'offline') raw = ruleBasedUpdate(current, digests);
     else {
-      try { raw = await this.callModel({ mpc, reward, rows, best }); }
+      try { raw = await this.callModel({ mpc, reward, rows, best, innerLoop }); }
       catch (error) {
         this.lastError = String(error.message || error).replace(/(key|token|bearer)\s*[:=]?\s*\S+/gi, '$1 [redacted]');
         raw = ruleBasedUpdate(current, digests); source = 'offline-fallback';
@@ -341,8 +341,10 @@ export class LlmMpcCoDesigner {
     return { ...update, source };
   }
 
-  userPayload({ mpc, reward, rows, best }) {
+  userPayload({ mpc, reward, rows, best, innerLoop = null }) {
     return JSON.stringify({
+      // Aggregated failure modes of the inner learning loop since the last meta-update.
+      innerLoopSummary: innerLoop,
       targetVelocityMs: 1.30, maxAllowedStrokeM: 0.120, maxResidualStrokeM: 0.030,
       currentMpcConfig: mpc, currentRewardWeights: reward,
       bestParetoCheckpoint: best ? { epoch: best.epoch, mpc: best.mpc, reward: best.reward, composite: round(best.composite, 3) } : null,

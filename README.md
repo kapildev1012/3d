@@ -258,3 +258,13 @@ Set `cfg.obstacleField = false` to turn the field off (e.g. for legacy benchmark
 `tools/run_hybrid_training.mjs` reads a local `.env` (git-ignored; see `.env.example`). With `VITE_LLM_API_URL`, `VITE_LLM_API_KEY` and `VITE_LLM_MODEL` it calls any OpenAI-compatible chat/completions endpoint (Gemini, Groq, or a local Ollama) with `response_format: json_object`. The reply is parsed, schema-validated and clamped. Without these, it uses `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and otherwise falls back to the offline rule-based tuner. Keys are never printed or stored in results.
 
 Controllers: **MPC + RL** (`residual_mppi`, trained with `npm run hybrid:rl`, MPC/reward fixed) and **MPC + RL + LLM** (`residual_mppi_llm`, trained with `npm run hybrid`, co-designed by the LLM).
+
+## Training schedule: inner learning loop and outer LLM meta-loop
+
+`npm run hybrid` (MPC + RL + LLM) and `npm run hybrid:rl` (MPC + RL, tuner off) run two nested loops:
+
+1. **Inner loop.** At least 100,000 physics steps per round; by default 500 episodes of 5 s, i.e. 1.25 M real steps plus about 9 M rollout steps with K = 8. The shared-memory worker pool runs the 500 Hz DAE (solid obstacles on). Each 20 Hz control tick goes through residual-MPPI, and each 0.5 s plan is followed by actor and twin-critic gradient updates. Episodes are domain-randomised over Levels 1–13 and the stress scenarios. The MPC weights and the reward stay fixed within a round. A checkpoint is written every 25 episodes, and `--resume` continues mid-round.
+2. **Outer loop.** Once per round, i.e. every `--inner-episodes` (500–1000) episodes, the meta-controller runs. It evaluates the checkpoint on the stress matrix and aggregates the round's failure modes: cable slack, rod residual, slip, overloads, aborts, and success per level and per scenario. The LLM (or the rule tuner) then retunes the MPC weights, the SGT gait timing and the reward. A Pareto archive with automatic rollback protects the best checkpoint.
+
+Throughput is about 110 physics steps/s per 2 cores, so one 500-episode round takes many hours. Run it on a machine with more cores, e.g.
+`caffeinate -i npm run hybrid -- --workers 8 --outer-rounds 3 --inner-episodes 500`.

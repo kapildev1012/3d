@@ -21,7 +21,7 @@
     "paper:pdf": "cd paper && latexmk -pdf -interaction=nonstopmode main.tex",
     "hybrid": "node tools/run_hybrid_training.mjs",
     "hybrid:rl": "node tools/run_hybrid_training.mjs --no-tuner",
-    "hybrid:quick": "node tools/run_hybrid_training.mjs --epochs 1 --candidates 4 --train-episodes 1 --train-duration 3 --eval-duration 4 --out results/hybrid_quick",
+    "hybrid:quick": "node tools/run_hybrid_training.mjs --outer-rounds 1 --candidates 4 --inner-episodes 4 --episode-duration 2 --min-inner-steps 0 --eval-duration 4 --out results/hybrid_quick",
     "paper:ext": "node tools/measure_sag.mjs && node tools/make_extension_tables.mjs && node tools/teaser_frames.mjs && python3 tools/make_teaser.py"
   }
 }
