@@ -167,6 +167,7 @@ for (let epoch = Math.max(1, epochStart); epoch <= epochs; epoch++) {
   const innerByLevel = epoch === epochStart && innerByLevelResume ? innerByLevelResume : perLevel(freshInner());
   const firstEpisode = epoch === epochStart ? episodeStart : 0;
   const roundStart = Date.now();
+  const stepsAtStart = (inner.realSteps || 0)+(inner.rolloutSteps || 0);   // resumed rounds: rate counts this session only
   for (let e = firstEpisode; e < trainEpisodes || inner.realSteps < minInnerSteps; e++) {
     const spec = multiTerrainSpec(epoch, e);
     model.params = paramsOf(spec.level);                   // terrain k runs with its own MPC / gait / reward
@@ -175,7 +176,7 @@ for (let epoch = Math.max(1, epochStart); epoch <= epochs; epoch++) {
     accumulateInner(inner, spec, r, { candidates: K, durationS: trainDuration });
     accumulateInner(innerByLevel[spec.level], spec, r, { candidates: K, durationS: trainDuration });
     if ((e+1) % checkpointEvery === 0 || e+1 === trainEpisodes) {
-      const rate = (inner.realSteps+inner.rolloutSteps)/Math.max(1e-3, (Date.now()-roundStart)/1000);
+      const rate = (inner.realSteps+inner.rolloutSteps-stepsAtStart)/Math.max(1e-3, (Date.now()-roundStart)/1000);
       log(`round ${epoch} episode ${e+1}/${trainEpisodes}: real steps ${inner.realSteps.toLocaleString()}, rollout steps ${inner.rolloutSteps.toLocaleString()} (${Math.round(rate).toLocaleString()} steps/s), success ${(100*inner.success/inner.episodes).toFixed(0)}%, mean progress ${(inner.progress/inner.episodes).toFixed(2)} m, slack ${(inner.slack/inner.episodes).toFixed(1)}%, max rod ${inner.rodMax.toFixed(4)} mm, ESS ${(inner.ess/inner.episodes).toFixed(1)} (${minutes()} min)`);
       saveState(epoch, e+1, inner, innerByLevel);
     }
