@@ -124,9 +124,18 @@ const snapshotModel = () => ({ actor: Array.from(model.actor.w), critic: model.c
 const restoreModel = extra => { model.actor.w.set(extra.actor); model.critic.load(extra.critic); };
 
 // Baselines on the same 14-terrain matrix (plain SGT and SGT under the 0.120 m clamp).
-const baselines = {};
-for (const variant of ['sgt', 'sgt120']) { baselines[variant] = await evaluate(variant); log(`baseline ${variant} done (${minutes()} min)`); }
-writeFileSync(path.join(outDir, 'baselines.json'), JSON.stringify(baselines, null, 1));
+// On --resume the baselines of the same run are reused (they do not depend on training).
+const baselinesPath = path.join(outDir, 'baselines.json');
+let baselines = null;
+if (flag('resume') && existsSync(baselinesPath)) {
+  const saved = JSON.parse(readFileSync(baselinesPath, 'utf8'));
+  if (saved.sgt?.length === matrix.length && saved.sgt120?.length === matrix.length) { baselines = saved; log('baselines reused from the previous run'); }
+}
+if (!baselines) {
+  baselines = {};
+  for (const variant of ['sgt', 'sgt120']) { baselines[variant] = await evaluate(variant); log(`baseline ${variant} done (${minutes()} min)`); }
+  writeFileSync(baselinesPath, JSON.stringify(baselines, null, 1));
+}
 
 const updateLevelBest = digests => {
   for (const L of TERRAIN_LEVELS) {
