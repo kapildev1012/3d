@@ -234,6 +234,41 @@ The simulated icosahedral shape (d/h = 1/φ) has no self-stress state. The stati
 
 `npm run tsgfem:validate` runs the original toolbox in GNU Octave (or MATLAB) on the exported rover model and compares it with the port. `tests/tsgfem.test.mjs` runs that comparison automatically when Octave is installed.
 
+## Parameter identification (Final Codes)
+
+`final_codes/` holds the MATLAB "Final Codes". `forward_tensegrity.m` is a static FEM solver for a planar tensegrity with 6 nodes, 3 struts and 6 springs. It finds the shape by ramping the rest lengths in 20 increments, then applies the load in 20 more, with a Newton step on the tangent stiffness each time. `MainFile.m` estimates five parameter factors from all 18 node coordinates under 100 random loads, using a particle filter (jitter, retries, residual resampling). The factors are the three strut rest lengths and the stiffness of the two spring types.
+
+| Where | What |
+| --- | --- |
+| `final_codes/original/` | the three files exactly as received |
+| `final_codes/` | runnable copies for MATLAB and GNU Octave (`npm run final:octave` saves `parameter_estimation.png` / `.mat`) |
+| `js/paramIdentification.js` | JavaScript port: generic static solver, the planar model, the particle filter |
+| `js/roverParamIdentification.js` | the same filter applied to the six-bar rover |
+| *Tools → Parameter identification* | runs either problem in the browser (web worker), live chart and table, JSON download |
+| `npm run final:identify` | both problems from the command line → `results/param_id/*.json`, `*.svg` |
+| `npm run final:validate` | runs the original `forward_tensegrity.m` in Octave and compares it with the port |
+
+Changes in the runnable copies (the algorithm is unchanged):
+
+- Stability now requires all eigenvalues of the reduced tangent stiffness to be positive. The original `eigs(K,1,'smallestabs') > 0` checks only the eigenvalue closest to zero. It accepted an equilibrium that also had a negative eigenvalue in 1 of 200 validation cases.
+- A failed solve returns NaN positions. The original left the output unassigned, which stops `MainFile.m` with an error.
+- The helper functions are now separate files, and `yline` is replaced by `plot`, so the code runs in Octave.
+- The parameters are labelled as what they are: strut rest-length and spring-stiffness factors. The old labels called all five "spring stiffness [N/mm]".
+
+**Validation.** The port reproduces the original on 300 random cases inside and around the filter's prior: the success flag always matches, and node positions agree within 3.5 × 10⁻¹² mm. On 200 extreme cases (parameters 0.2–2.5), the flags also match. One case has two stable equilibria, and rounding sends each solver to a different one; both answers balance to 10⁻¹⁰ N. The port runs a solve in 0.6 ms; Octave takes 170 ms. The force criterion of the original sums the internal forces over all nodes, which cancels to zero by construction. Convergence therefore rests on the displacement criterion.
+
+**Results** (no sensor noise, seed 46):
+
+| Problem | Parameters | Largest error | Run time |
+| --- | --- | --- | --- |
+| Planar, MainFile.m settings (100 load cases, 100 particles) | strut lengths, spring stiffness | 0.11 % (struts), 0.77 % (springs) | 5 s (JS) |
+| Same, Octave run of the fixed `MainFile.m` | same | 0.23 % (struts), 2.9 % (springs) | ≈ 30 min |
+| Rover, 80 load cases, 100 particles | outer/payload cable stiffness and pre-stretch | 0.56 % | 42 s (JS) |
+
+Octave's random-number stream differs from JavaScript's, so its run differs in detail but not in kind. With few effective particles (N_eff ≈ 3–4), the ±2σ band is narrower than the true error at times. In the Octave run, spring stiffness 1 ends 2.5 % low, outside its band.
+
+**Rover.** The static model is the TsgFEM equilibrium shape: 12 shell nodes plus the payload, 6 bars, 24 outer and 12 payload cables, with 50 N design pretension in the payload cables. A 3-2-1 support removes rigid-body motion without adding stiffness. A solve that leaves any cable slack counts as failed. A Fisher-information check gives Cramér–Rao standard deviations of 0.1–0.2 % for all four factors at 0.1 mm measurement error, so they are identifiable. However, outer-cable stiffness and pre-stretch are −0.95 correlated (payload pair −0.83). With MainFile.m's settings unchanged, most test runs ended 2–30 % off along that ridge. The rover therefore adds one option: the likelihood width starts at 3 mm and narrows to 0.1 mm (`anneal`). With it, 5 of 5 seeds end within 1 %. With 0.05 mm sensor noise, the errors stay below 2.4 %.
+
 ## Verify
 
 ```bash

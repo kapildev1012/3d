@@ -369,6 +369,39 @@
         <p id="tsgfem-note" class="hint"></p>
         <button type="button" id="btn-export-tsgfem" class="btn btn-xs" disabled>Export model for MATLAB / Octave TsgFEM</button>
       </section>
+      <section data-tab-panel="tools" hidden class="panel-section" id="paramid-panel">
+        <h3 class="sec-title">Parameter identification · particle filter <span class="sec-note">Final Codes</span></h3>
+        <p class="hint">Estimates structural parameters from node positions measured under known loads: the particle filter of <code>final_codes/MainFile.m</code> with the static solver of <code>forward_tensegrity.m</code>, ported to JavaScript and checked against the MATLAB originals.</p>
+        <div class="form-grid">
+          <label for="paramid-mode">Structure</label>
+          <select id="paramid-mode" class="select">
+            <option value="planar">Planar tensegrity (Final Codes)</option>
+            <option value="rover">Six-bar rover (cables)</option>
+          </select>
+          <label for="paramid-steps">Load cases</label>
+          <input id="paramid-steps" type="number" min="5" max="300" step="5" value="100" class="input w-num">
+          <label for="paramid-particles">Particles</label>
+          <input id="paramid-particles" type="number" min="10" max="500" step="10" value="100" class="input w-num">
+          <label for="paramid-noise">Sensor noise σ</label>
+          <div class="row-inline"><input id="paramid-noise" type="number" min="0" max="1" step="0.01" value="0" class="input w-num"><span class="unit">mm</span></div>
+          <label for="paramid-seed">Seed</label>
+          <input id="paramid-seed" type="number" min="0" step="1" value="46" class="input w-num">
+        </div>
+        <p id="paramid-note" class="hint"></p>
+        <div class="btn-row">
+          <button type="button" id="paramid-run" class="btn btn-primary">Run identification</button>
+          <button type="button" id="paramid-stop" class="btn" disabled>Stop</button>
+        </div>
+        <p id="paramid-status" class="hint" role="status" aria-live="polite">Idle</p>
+        <div id="paramid-chart" class="pid-chart" aria-label="Estimate per load case with ±2σ band; dashed lines are the true values"></div>
+        <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>Parameter</th><th class="r">True</th><th class="r">Estimate<span>± 2σ</span></th><th class="r">Error</th></tr></thead>
+            <tbody id="paramid-body"></tbody>
+          </table>
+        </div>
+        <button type="button" id="paramid-download" class="btn btn-xs" disabled>Download results (JSON)</button>
+      </section>
       <section data-tab-panel="tools" hidden class="panel-section">
         <h3 class="sec-title">Structural optimizer <span class="sec-note">27 trials × 0.6 s</span></h3>
         <p class="hint">Quick screen of pretension, stiffness and stroke. Use the paper benchmark or <code>npm run experiments</code> for full-length runs.</p>

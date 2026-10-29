@@ -434,3 +434,10 @@ input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
 #hybrid-panel textarea { resize: vertical; font: inherit; }
 .hybrid-log { max-height: 220px; overflow: auto; font-size: 12px; padding-left: 20px; margin: 6px 0 0; }
 .hybrid-log li { margin: 2px 0; word-break: break-word; }
+
+/* Parameter identification (Tools tab) */
+.pid-chart { margin-top: 10px; min-height: 40px; }
+.pid-chart svg { display: block; }
+.pid-swatch { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
+#paramid-panel .table { margin-top: 8px; }
+#paramid-download { margin-top: 10px; }

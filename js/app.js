@@ -27,6 +27,7 @@ import { EXPERIMENT_SCHEMA, validateObject, validateSettingsFile } from './confi
 import { SCENARIOS } from './experimentProtocol.js?v=20261027-ob1';
 import { BenchmarkPanel } from './benchmarkPanel.js?v=20261027-ob1';
 import { HybridPanel } from './hybridPanel.js?v=20261027-ob1';
+import { ParamIdPanel } from './paramIdPanel.js?v=20261029-pf1';
 import { installMatlabTheme, setChartTheme, matlabLineOptions, matlabLine, xy, exportChartPNG, exportChartCSV, exportChartIEEE } from './matlabCharts.js?v=20261027-ob1';
 
 const Chart = window.Chart;
@@ -88,6 +89,7 @@ class App {
     this.initCharts();
     this.benchmarkPanel = new BenchmarkPanel(Chart, charts => { this.benchmarkCharts = charts; });
     this.hybridPanel = new HybridPanel();
+    this.paramIdPanel = new ParamIdPanel();
     this.initMonitoringControls();
 
     this.recorder = new RunRecorder(this, this.persistence);
